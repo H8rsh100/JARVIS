@@ -400,21 +400,20 @@ export function createJarvisTools(ctx: {
         if (!ownerAddr || !isAddress(ownerAddr)) {
           return { ok: false, error: "Owner address required." };
         }
-        const data = encodeDeployData({
-          abi: SIMPLE_VAULT_ABI,
-          bytecode: SIMPLE_VAULT_BYTECODE,
-          args: [ownerAddr],
-        });
         const intent: UnsignedIntent = {
           id: newIntentId(),
           kind: "deploy",
           chainKey,
           chainId: chainByKey[chainKey].id,
           summary: `Deploy SimpleVault (owner ${ownerAddr}) on ${chainByKey[chainKey].name}`,
-          data,
           bytecode: SIMPLE_VAULT_BYTECODE,
           abi: SIMPLE_VAULT_ABI as unknown[],
           constructorArgs: [ownerAddr],
+          data: encodeDeployData({
+            abi: SIMPLE_VAULT_ABI,
+            bytecode: SIMPLE_VAULT_BYTECODE,
+            args: [ownerAddr],
+          }),
           nativeAmount: "0",
         };
         ctx.onIntent?.(intent);
