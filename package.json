@@ -1,0 +1,16 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "version": "1.0.0",
+  "description": "JARVIS — voice-first Web3 assistant",
+  "scripts": {
+    "dev": "pnpm --filter @jarvis/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
