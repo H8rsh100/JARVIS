@@ -1,5 +1,13 @@
-import type { ChainKey } from "./index";
-import { chainByKey } from "./index";
+import { baseSepolia, sepolia } from "viem/chains";
+import { rootstockTestnet } from "./rootstock";
+
+export type ChainKey = "sepolia" | "base-sepolia" | "rootstock-testnet";
+
+export const chainByKey = {
+  sepolia,
+  "base-sepolia": baseSepolia,
+  "rootstock-testnet": rootstockTestnet,
+} as const;
 
 export function explorerApiHint(chainKey: ChainKey): string {
   switch (chainKey) {
