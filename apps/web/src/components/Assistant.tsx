@@ -216,6 +216,24 @@ export function Assistant({
 
       <p className="text-sm text-mist/80">Hold to talk · or type below</p>
 
+      <div className="flex w-full flex-wrap justify-center gap-2">
+        {[
+          "Check my balance on Base",
+          "What can you do on Rootstock?",
+          "Show my recent transfers on Sepolia",
+        ].map((hint) => (
+          <button
+            key={hint}
+            type="button"
+            disabled={busy}
+            onClick={() => void runChat(hint)}
+            className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-mist transition hover:border-signal/40 hover:text-white disabled:opacity-50"
+          >
+            {hint}
+          </button>
+        ))}
+      </div>
+
       <form
         className="flex w-full gap-2"
         onSubmit={(e) => {

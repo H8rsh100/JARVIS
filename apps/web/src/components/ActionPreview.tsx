@@ -2,10 +2,10 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  useEstimateGas,
   useSendTransaction,
   useSwitchChain,
   useWaitForTransactionReceipt,
-  useWriteContract,
   useDeployContract,
 } from "wagmi";
 import { useEffect, useMemo, useState } from "react";
@@ -32,8 +32,6 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
     reset: resetSend,
     error: sendError,
   } = useSendTransaction();
-  const { writeContractAsync, data: writeHash, reset: resetWrite, error: writeError } =
-    useWriteContract();
   const {
     deployContractAsync,
     data: deployHash,
@@ -42,7 +40,22 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
   } = useDeployContract();
 
   const [submitting, setSubmitting] = useState(false);
-  const pendingHash = sendHash || writeHash || deployHash;
+  const pendingHash = sendHash || deployHash;
+
+  const estimateInput = useMemo(() => {
+    if (!intent) return undefined;
+    if (intent.kind === "deploy") return undefined;
+    if (!intent.to) return undefined;
+    return {
+      to: intent.to,
+      value: intent.valueWei ? BigInt(intent.valueWei) : 0n,
+      data: (intent.data as Hex | undefined) || undefined,
+      chainId: intent.chainId,
+    };
+  }, [intent]);
+
+  const { data: gasEstimate, error: gasError } = useEstimateGas(estimateInput);
+
   const { isSuccess, isError, error: receiptError } = useWaitForTransactionReceipt({
     hash: pendingHash,
   });
@@ -59,7 +72,6 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
     if (isSuccess) {
       onResolved({ status: "confirmed", txHash: pendingHash });
       resetSend();
-      resetWrite();
       resetDeploy();
       setSubmitting(false);
     } else if (isError) {
@@ -76,12 +88,11 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
     receiptError,
     onResolved,
     resetSend,
-    resetWrite,
     resetDeploy,
   ]);
 
   useEffect(() => {
-    const err = sendError || writeError || deployError;
+    const err = sendError || deployError;
     if (err && submitting) {
       const msg = err.message || "Wallet error";
       if (/user rejected|denied/i.test(msg)) {
@@ -91,7 +102,7 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
       }
       setSubmitting(false);
     }
-  }, [sendError, writeError, deployError, submitting, onResolved]);
+  }, [sendError, deployError, submitting, onResolved]);
 
   async function confirm() {
     if (!intent) return;
@@ -99,18 +110,11 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
     try {
       await switchChainAsync({ chainId: intent.chainId });
 
-      if (intent.kind === "transfer" || intent.kind === "swap") {
+      if (intent.kind === "transfer" || intent.kind === "swap" || intent.kind === "token_transfer") {
         await sendTransactionAsync({
           to: intent.to,
           value: intent.valueWei ? BigInt(intent.valueWei) : 0n,
           data: intent.data as Hex | undefined,
-          chainId: intent.chainId,
-        });
-      } else if (intent.kind === "token_transfer") {
-        await sendTransactionAsync({
-          to: intent.to,
-          data: intent.data as Hex,
-          value: 0n,
           chainId: intent.chainId,
         });
       } else if (intent.kind === "deploy") {
@@ -172,6 +176,18 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
                 <dd className="text-white">{intent.nativeAmount}</dd>
               </div>
             )}
+            <div>
+              <dt className="text-mist/50">est. gas</dt>
+              <dd className="text-white">
+                {gasEstimate
+                  ? gasEstimate.toString()
+                  : gasError
+                    ? "unavailable"
+                    : intent.kind === "deploy"
+                      ? "on confirm"
+                      : "estimating…"}
+              </dd>
+            </div>
           </dl>
           {overCap && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-100">
