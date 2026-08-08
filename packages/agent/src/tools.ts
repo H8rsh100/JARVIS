@@ -15,6 +15,7 @@ import {
 } from "viem";
 import {
   chainByKey,
+  describeChainCapabilities,
   resolveChainKey,
   rpcUrls,
   swapSupportedKeys,
@@ -79,6 +80,23 @@ export function createJarvisTools(ctx: {
   onIntent?: (intent: UnsignedIntent) => void;
 }) {
   return {
+    get_chain_capabilities: tool({
+      description:
+        "Describe what JARVIS can do on a chain (reads, transfers, swaps, deploy).",
+      parameters: z.object({
+        chain: z.string().describe("sepolia | base-sepolia | rootstock-testnet"),
+      }),
+      execute: async ({ chain }) => {
+        const chainKey = parseChain(chain);
+        return {
+          ok: true,
+          chainKey,
+          chainId: chainByKey[chainKey].id,
+          ...describeChainCapabilities(chainKey),
+        };
+      },
+    }),
+
     get_balance: tool({
       description: "Get native token balance for an address on a supported chain.",
       parameters: z.object({

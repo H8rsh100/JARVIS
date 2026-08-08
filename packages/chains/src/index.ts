@@ -80,3 +80,4 @@ export const rpcUrls: Record<ChainKey, string> = {
 export const swapSupportedKeys: ChainKey[] = ["sepolia", "base-sepolia"];
 
 export { sepolia, baseSepolia };
+export * from "./capabilities";
