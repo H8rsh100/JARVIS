@@ -1,13 +1,16 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Sora:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-display: "Instrument Serif", Georgia, serif;
-  --font-sans: "Sora", system-ui, sans-serif;
+  --font-display: "Orbitron", sans-serif;
+  --font-sans: "Rajdhani", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --hud-cyan: #22d3ee;
+  --hud-amber: #fbbf24;
+  --ink: #030712;
   color-scheme: dark;
 }
 
@@ -18,29 +21,84 @@ body {
 
 body {
   margin: 0;
-  background: #070b12;
-  color: #e8eef7;
+  background: #030712;
+  color: #e2e8f0;
   font-family: var(--font-sans);
 }
 
 .jarvis-atmosphere {
   background:
-    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(196, 122, 58, 0.28), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 80% 20%, rgba(61, 214, 198, 0.12), transparent 50%),
-    radial-gradient(ellipse 60% 40% at 15% 70%, rgba(40, 80, 120, 0.35), transparent 45%),
-    linear-gradient(180deg, #0a101a 0%, #070b12 45%, #05080e 100%);
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(34, 211, 238, 0.16), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 85% 70%, rgba(251, 191, 36, 0.08), transparent 50%),
+    radial-gradient(ellipse 45% 35% at 10% 80%, rgba(14, 116, 144, 0.2), transparent 50%),
+    linear-gradient(180deg, #04101a 0%, #030712 50%, #010409 100%);
 }
 
 .jarvis-grid {
   background-image:
-    linear-gradient(rgba(159, 176, 195, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(159, 176, 195, 0.06) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%);
+    linear-gradient(rgba(34, 211, 238, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 15%, transparent 72%);
 }
 
 .jarvis-noise {
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
+  opacity: 0.05;
   pointer-events: none;
+}
+
+.jarvis-scan {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(34, 211, 238, 0.08) 50%,
+    transparent 100%
+  );
+  height: 18%;
+  width: 100%;
+  animation: scan-y 5.5s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scan-y {
+  0% {
+    transform: translateY(-120%);
+  }
+  100% {
+    transform: translateY(620%);
+  }
+}
+
+.hud-corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-color: rgba(34, 211, 238, 0.45);
+  pointer-events: none;
+}
+
+.hud-corner-tl {
+  top: 10px;
+  left: 10px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+.hud-corner-tr {
+  top: 10px;
+  right: 10px;
+  border-top: 2px solid;
+  border-right: 2px solid;
+}
+.hud-corner-bl {
+  bottom: 10px;
+  left: 10px;
+  border-bottom: 2px solid;
+  border-left: 2px solid;
+}
+.hud-corner-br {
+  bottom: 10px;
+  right: 10px;
+  border-bottom: 2px solid;
+  border-right: 2px solid;
 }

@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import type { Address } from "viem";
 import type { ActivityItem, UnsignedIntent } from "@jarvis/agent";
 import { ActionPreview } from "@/components/ActionPreview";
 import { ActivityFeed } from "@/components/ActivityFeed";
+import { ArcCore } from "@/components/ArcCore";
 
 type Props = {
   walletAddress?: Address;
@@ -192,19 +192,9 @@ export function Assistant({
   }, []);
 
   return (
-    <div className="flex w-full flex-col items-center gap-6">
-      <div className="relative">
-        <AnimatePresence>
-          {listening && (
-            <motion.span
-              className="absolute inset-0 -m-3 rounded-full border border-signal/40"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: [0.4, 0.9, 0.4], scale: [1, 1.12, 1] }}
-              exit={{ opacity: 0 }}
-              transition={{ repeat: Infinity, duration: 1.4 }}
-            />
-          )}
-        </AnimatePresence>
+    <div className="flex w-full flex-col items-center gap-5">
+      <div className="relative flex flex-col items-center">
+        <ArcCore listening={listening} busy={busy} />
         <button
           type="button"
           disabled={busy}
@@ -219,16 +209,18 @@ export function Assistant({
             e.preventDefault();
             stopListening();
           }}
-          className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/10 bg-panel/80 shadow-glow backdrop-blur-md transition hover:border-signal/50 disabled:opacity-60"
+          className="absolute top-1/2 z-10 flex h-24 w-24 -translate-y-1/2 items-center justify-center rounded-full border border-cyan-300/40 bg-slate-950/50 backdrop-blur-sm transition hover:border-cyan-200 disabled:opacity-60"
           aria-label="Hold to talk"
         >
-          <span className="font-mono text-xs uppercase tracking-[0.25em] text-signal">
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-cyan-200">
             {listening ? "listen" : busy ? "think" : "hold"}
           </span>
         </button>
       </div>
 
-      <p className="text-sm text-mist/80">Hold to talk · or type below</p>
+      <p className="font-mono text-xs uppercase tracking-[0.25em] text-cyan-200/60">
+        Hold to talk · or type below
+      </p>
 
       <div className="flex w-full flex-wrap justify-center gap-2">
         {[
@@ -241,7 +233,7 @@ export function Assistant({
             type="button"
             disabled={busy}
             onClick={() => void runChat(hint)}
-            className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-mist transition hover:border-signal/40 hover:text-white disabled:opacity-50"
+            className="rounded border border-cyan-500/25 bg-cyan-950/30 px-3 py-1.5 font-mono text-[11px] text-cyan-100/80 transition hover:border-cyan-300/50 hover:text-white disabled:opacity-50"
           >
             {hint}
           </button>
@@ -266,12 +258,12 @@ export function Assistant({
               ? 'e.g. "check my balance on Base"'
               : "Connect wallet, then ask JARVIS…"
           }
-          className="flex-1 rounded-xl border border-white/10 bg-panel/70 px-4 py-3 text-sm text-white outline-none ring-signal/40 placeholder:text-mist/50 focus:ring-2"
+          className="flex-1 rounded border border-cyan-500/30 bg-slate-950/70 px-4 py-3 font-sans text-sm text-white outline-none ring-cyan-400/30 placeholder:text-slate-500 focus:ring-2"
         />
         <button
           type="submit"
           disabled={busy || !textInput.trim()}
-          className="rounded-xl bg-copper px-4 py-3 text-sm font-medium text-ink disabled:opacity-50"
+          className="rounded bg-cyan-400 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-slate-950 disabled:opacity-50"
         >
           Send
         </button>
@@ -279,23 +271,23 @@ export function Assistant({
 
       <div className="w-full space-y-2 text-left">
         {transcript && (
-          <p className="font-mono text-xs text-mist">
-            <span className="text-signal/80">you · </span>
+          <p className="font-mono text-xs text-slate-400">
+            <span className="text-cyan-300/80">you · </span>
             {transcript}
           </p>
         )}
         {reply && (
-          <p className="text-sm leading-relaxed text-white/90">
-            <span className="font-mono text-xs text-copper">jarvis · </span>
+          <p className="text-sm leading-relaxed text-cyan-50/95">
+            <span className="font-mono text-xs text-amber-300">jarvis · </span>
             {reply}
           </p>
         )}
         {error && (
-          <p className="rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+          <p className="rounded border border-red-500/30 bg-red-950/40 px-3 py-2 text-sm text-red-200">
             {error}
           </p>
         )}
-        <p className="font-mono text-[10px] text-mist/60">
+        <p className="font-mono text-[10px] text-slate-500">
           session soft cap · {spendCap} native · chainId {chainId || "—"}
         </p>
       </div>
