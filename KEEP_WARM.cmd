@@ -9,7 +9,11 @@ taskkill /F /IM electron.exe >nul 2>nul
 powershell -NoProfile -Command "$ports=3000,3847; foreach($p in $ports){ Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }"
 timeout /t 1 /nobreak >nul
 
-if not exist "apps\web\.next\BUILD_ID" (
+REM Rebuild when missing, or when FORCE_REBUILD=1 (date/time & UI changes need this)
+if "%FORCE_REBUILD%"=="1" (
+  echo Force rebuilding UI...
+  call pnpm --filter @jarvis/web build
+) else if not exist "apps\web\.next\BUILD_ID" (
   echo Building once...
   call pnpm --filter @jarvis/web build
 )
