@@ -5,9 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "start": "next start -p 3000"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.22",
