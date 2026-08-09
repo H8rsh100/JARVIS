@@ -2,9 +2,11 @@
   "name": "jarvis",
   "private": true,
   "version": "1.0.0",
-  "description": "JARVIS — voice-first Web3 assistant",
+  "description": "JARVIS - voice laptop assistant + optional Web3 tools",
   "scripts": {
     "dev": "pnpm --filter @jarvis/web dev",
+    "agent": "pnpm --filter @jarvis/desktop-agent dev",
+    "demo": "pnpm agent",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"

@@ -16,19 +16,14 @@ export function WalletButton() {
       <div className="flex flex-col items-end gap-1">
         <button
           type="button"
-          disabled={isPending || connectors.length === 0}
-          onClick={() => {
-            const c = connectors[0];
-            if (c) connect({ connector: c });
-          }}
+          disabled={isPending || !connectors[0]}
+          onClick={() => connectors[0] && connect({ connector: connectors[0] })}
           className="rounded-xl bg-signal px-3 py-2 text-xs font-semibold text-ink disabled:opacity-50"
         >
-          {isPending ? "Connecting…" : "Connect wallet"}
+          {isPending ? "Connecting..." : "Connect wallet"}
         </button>
-        {error && (
-          <span className="max-w-[12rem] text-right font-mono text-[10px] text-red-300">
-            {error.message}
-          </span>
+        {error?.message.includes("Provider not found") && (
+          <span className="font-mono text-[10px] text-red-300">Install MetaMask</span>
         )}
       </div>
     );
@@ -53,7 +48,7 @@ export function WalletButton() {
         className="rounded-xl border border-white/15 px-3 py-2 font-mono text-[11px] text-mist"
         title={address}
       >
-        {address?.slice(0, 6)}…{address?.slice(-4)}
+        {address?.slice(0, 6)}...{address?.slice(-4)}
       </button>
     </div>
   );

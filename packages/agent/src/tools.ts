@@ -16,6 +16,7 @@ import {
 import {
   chainByKey,
   describeChainCapabilities,
+  explorerAddressUrl,
   resolveChainKey,
   rpcUrls,
   swapSupportedKeys,
@@ -184,59 +185,24 @@ export function createJarvisTools(ctx: {
 
     get_tx_history: tool({
       description:
-        "Get recent native transfer activity involving an address (last N blocks scan + explorer hint).",
+        "Get explorer link for wallet activity. Do NOT deep-scan blocks (too slow). Prefer this for history questions.",
       parameters: z.object({
         chain: z.string(),
         address: z.string().optional(),
-        limit: z.number().int().min(1).max(20).default(5),
       }),
-      execute: async ({ chain, address, limit }) => {
+      execute: async ({ chain, address }) => {
         const chainKey = parseChain(chain);
         const addr = (address || ctx.walletAddress) as Address | undefined;
         if (!addr || !isAddress(addr)) {
           return { ok: false, error: "No valid wallet address provided." };
         }
-        const publicClient = clientFor(chainKey);
-        const latest = await publicClient.getBlockNumber();
-        const scan = chainKey === "rootstock-testnet" ? 30n : 12n;
-        const fromBlock = latest > scan ? latest - scan : 0n;
-        const items: Array<{
-          hash: string;
-          from: string;
-          to: string | null;
-          value: string;
-          blockNumber: string;
-        }> = [];
-
-        for (let b = latest; b > fromBlock && items.length < limit; b--) {
-          const block = await publicClient.getBlock({
-            blockNumber: b,
-            includeTransactions: true,
-          });
-          for (const tx of block.transactions) {
-            if (typeof tx === "string") continue;
-            const involved =
-              tx.from?.toLowerCase() === addr.toLowerCase() ||
-              tx.to?.toLowerCase() === addr.toLowerCase();
-            if (!involved) continue;
-            items.push({
-              hash: tx.hash,
-              from: tx.from,
-              to: tx.to,
-              value: formatEther(tx.value),
-              blockNumber: b.toString(),
-            });
-            if (items.length >= limit) break;
-          }
-        }
-
         return {
           ok: true,
           chainKey,
           address: addr,
-          scannedBlocks: Number(scan),
-          items,
-          note: "Recent native txs from a short block scan. For full history use the block explorer.",
+          items: [],
+          explorer: explorerAddressUrl(chainByKey[chainKey].id, addr),
+          note: "Open the explorer link for full history. Live block scanning is disabled for speed.",
         };
       },
     }),

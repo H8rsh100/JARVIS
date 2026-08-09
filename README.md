@@ -1,78 +1,61 @@
 # JARVIS
 
-Voice-first Web3 assistant. Speak a chain action — JARVIS prepares it; you confirm in your wallet.
+Voice laptop assistant with a Stark-style UI. Say **Hello Jarvis**, then tell it what to open on your Windows PC.
 
-Fresh rewrite of the Blockchain J.A.R.V.I.S idea: reliable tool-calling, confirm-gated signing, multi-chain reads/writes, and a brand-first assistant UI.
+## What it does (demo story)
 
-## Features
+1. Wake: `Hello Jarvis` → *Hello sir, ready to assist*
+2. `Open Chrome` / `Open VS Code` / `Open Cursor` → launches on your machine
+3. `Open my project` → opens `C:\PROJECTS\JARVIS` in Explorer
+4. `Open YouTube` / `Open localhost:3000` → opens in browser
+5. `Open camera` → webcam in the UI
 
-- **Voice + text** — hold-to-talk (Gemini audio STT) or type; spoken replies (browser TTS)
-- **Agent tools** — balances, token balances, recent transfers, transfers, ERC-20 transfers, 0x swaps, SimpleVault deploy
-- **Confirm-gated writes** — unsigned intents only; wallet signs after preview (gas estimate + session soft cap)
-- **Chains** — Ethereum Sepolia, Base Sepolia, Rootstock Testnet
-- **Activity feed** — session history with explorer links
+Optional: crypto tools still exist in the stack, but the **hiring demo** is local control.
 
-## Stack
+## Run (2 terminals)
 
-| Layer | Tech |
-|-------|------|
-| App | Next.js 15, TypeScript, Tailwind, Framer Motion |
-| Wallet | wagmi v2, viem (injected browser wallets) |
-| Agent | Vercel AI SDK + Google Gemini (AI Studio) |
-| Voice | Gemini audio transcription + browser speechSynthesis |
-| Contracts | Foundry (`SimpleVault`) |
-| Monorepo | pnpm workspaces |
-
-## Setup
-
-```bash
+```powershell
+cd C:\PROJECTS\JARVIS
 pnpm install
-cp .env.example apps/web/.env.local
 ```
 
-Fill in:
+**Terminal A – desktop agent (required for laptop actions):**
+```powershell
+pnpm agent
+```
+You should see: `JARVIS desktop agent on http://127.0.0.1:3847`
 
-- `GOOGLE_GENERATIVE_AI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey)
-- Optional: RPC URLs, `ZEROX_API_KEY`, `NEXT_PUBLIC_SESSION_SPEND_CAP`
+**Terminal B – UI:**
+```powershell
+pnpm --filter @jarvis/web dev
+```
+Open the URL Next prints (usually http://localhost:3000).
 
-```bash
-pnpm dev
+In `apps/web/.env.local`:
+```env
+GOOGLE_GENERATIVE_AI_API_KEY=your_ai_studio_key
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+## 90-second demo script
 
-## Voice / text examples
-
-- "Check my balance on Base"
-- "What can you do on Rootstock?"
-- "Show my recent transfers on Sepolia"
-- "Send 0.01 ETH to 0x…"
-- "Prepare a SimpleVault deploy on Sepolia"
-- "Quote a swap of 0.01 ETH to USDC on Base" (needs `ZEROX_API_KEY`)
+1. Refresh page, say/type: **Hello Jarvis**
+2. **Open Chrome**
+3. **Open VS Code** (or **Open Cursor**)
+4. **Open my project**
+5. **Open camera**
 
 ## Safety
 
-JARVIS **never** holds private keys. Prepare tools return unsigned intents; the UI shows a confirmation card; you sign in-wallet.
-
-Session soft cap (`NEXT_PUBLIC_SESSION_SPEND_CAP`) warns when a native amount exceeds the hint — it does not block signing.
+- Agent only listens on `127.0.0.1` (this PC only)
+- Shell commands need explicit confirm and a deny-list for dangerous patterns
+- Browser still cannot control your PC alone; the **desktop agent** is what executes actions
 
 ## Layout
 
 ```
-apps/web            Next.js UI + /api/chat|/transcribe|/speak
-packages/agent      Tool schemas, prompts, SimpleVault artifact helpers
-packages/chains     Chain configs, explorers, capabilities
-contracts           Foundry SimpleVault + deploy script
+apps/web             Next.js UI + voice
+apps/desktop-agent   Local Windows action runner
+packages/agent       Optional Web3 tool helpers
+packages/chains      Chain configs
+contracts            Sample Solidity
 ```
-
-## Contracts
-
-```bash
-cd contracts
-forge install foundry-rs/forge-std --no-commit   # if needed for scripts
-forge build
-```
-
-## License
-
-MIT

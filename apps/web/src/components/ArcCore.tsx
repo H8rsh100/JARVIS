@@ -2,56 +2,59 @@
 
 import { motion } from "framer-motion";
 
-type Props = {
-  listening?: boolean;
-  busy?: boolean;
-};
+type Props = { listening?: boolean; busy?: boolean };
 
-/** Arc-reactor style core — visual heartbeat of JARVIS */
+/** Arc-reactor core on top of the existing layout */
 export function ArcCore({ listening, busy }: Props) {
   const active = listening || busy;
   return (
-    <div className="pointer-events-none relative mx-auto h-44 w-44 md:h-52 md:w-52">
+    <div className="relative mx-auto h-44 w-44 md:h-48 md:w-48">
       <motion.div
-        className="absolute inset-0 rounded-full border border-cyan-400/25"
+        className="absolute inset-0 rounded-full border border-signal/20"
         animate={{ rotate: 360 }}
-        transition={{ duration: 28, repeat: Infinity, ease: "linear" }}
+        transition={{ duration: 32, repeat: Infinity, ease: "linear" }}
       />
       <motion.div
-        className="absolute inset-3 rounded-full border border-dashed border-amber-400/30"
+        className="absolute inset-3 rounded-full border border-white/[0.07]"
         animate={{ rotate: -360 }}
-        transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
+        transition={{ duration: 22, repeat: Infinity, ease: "linear" }}
       />
       <motion.div
-        className="absolute inset-8 rounded-full border border-cyan-300/40"
-        animate={{ scale: active ? [1, 1.06, 1] : [1, 1.02, 1] }}
-        transition={{ duration: active ? 0.9 : 2.4, repeat: Infinity }}
+        className="absolute inset-7 rounded-full border border-dashed border-copper/25"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 16, repeat: Infinity, ease: "linear" }}
+      />
+      <motion.div
+        className="absolute inset-12 rounded-full border border-signal/35"
+        animate={{ scale: active ? [1, 1.05, 1] : [1, 1.015, 1] }}
+        transition={{ duration: active ? 0.85 : 2.6, repeat: Infinity }}
       />
       <div
-        className={`absolute inset-12 rounded-full ${
-          active ? "bg-cyan-400/25 shadow-[0_0_60px_rgba(34,211,238,0.55)]" : "bg-cyan-500/10"
+        className={`absolute inset-[3.75rem] rounded-full md:inset-16 ${
+          active ? "bg-signal/20 shadow-glow" : "bg-signal/[0.08]"
         }`}
       />
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div
-          className={`h-10 w-10 rounded-full ${
-            listening
-              ? "bg-cyan-300 shadow-[0_0_30px_rgba(103,232,249,0.9)]"
-              : busy
-                ? "bg-amber-300 shadow-[0_0_28px_rgba(252,211,77,0.8)]"
-                : "bg-cyan-500/70 shadow-[0_0_20px_rgba(34,211,238,0.45)]"
-          }`}
-        />
-      </div>
-      {[0, 45, 90, 135].map((deg) => (
-        <motion.span
+      {/* tick marks */}
+      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+        <span
           key={deg}
-          className="absolute left-1/2 top-1/2 h-px w-16 origin-left bg-gradient-to-r from-cyan-300/50 to-transparent"
-          style={{ rotate: deg }}
-          animate={{ opacity: [0.2, 0.7, 0.2] }}
-          transition={{ duration: 2.2, repeat: Infinity, delay: deg / 180 }}
+          className="absolute left-1/2 top-1/2 h-[2px] w-2.5 origin-left bg-signal/30"
+          style={{ transform: `rotate(${deg}deg) translateX(4.6rem)` }}
         />
       ))}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <motion.div
+          className={`h-10 w-10 rounded-full ${
+            listening
+              ? "bg-signal shadow-[0_0_32px_rgba(61,214,198,0.95)]"
+              : busy
+                ? "bg-copper shadow-[0_0_28px_rgba(196,122,58,0.8)]"
+                : "bg-signal/75 shadow-[0_0_20px_rgba(61,214,198,0.45)]"
+          }`}
+          animate={listening ? { scale: [1, 1.14, 1] } : {}}
+          transition={{ duration: 0.75, repeat: Infinity }}
+        />
+      </div>
     </div>
   );
 }

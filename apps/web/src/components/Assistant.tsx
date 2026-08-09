@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import type { Address } from "viem";
 import type { ActivityItem, UnsignedIntent } from "@jarvis/agent";
 import { ActionPreview } from "@/components/ActionPreview";
-import { ActivityFeed } from "@/components/ActivityFeed";
 import { ArcCore } from "@/components/ArcCore";
+import {
+  agentHealth,
+  executeLocalAction,
+  parseLocalAction,
+} from "@/lib/localActions";
 
 type Props = {
   walletAddress?: Address;
@@ -14,12 +19,20 @@ type Props = {
   spendCap: string;
 };
 
+const WAKE =
+  /\b(hello|hey|hi|ok|okay)\s+jarvis\b|\bjarvis\s+(hello|hey|hi)\b/i;
+
+function isWake(text: string) {
+  return WAKE.test(text.trim());
+}
+
 export function Assistant({
   walletAddress,
   chainId,
   isConnected,
   spendCap,
 }: Props) {
+  const [awake, setAwake] = useState(false);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -28,70 +41,185 @@ export function Assistant({
   const [textInput, setTextInput] = useState("");
   const [intent, setIntent] = useState<UnsignedIntent | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const mediaRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [status, setStatus] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const camStreamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
-  const pushActivity = useCallback((item: Omit<ActivityItem, "id" | "at"> & { id?: string }) => {
-    const full: ActivityItem = {
-      id: item.id || `act_${Date.now()}`,
-      at: Date.now(),
-      userText: item.userText,
-      assistantText: item.assistantText,
-      intentId: item.intentId,
-      txHash: item.txHash,
-      status: item.status,
-      error: item.error,
-    };
-    setActivity((prev) => [full, ...prev].slice(0, 40));
-    return full;
-  }, []);
+  const pushActivity = useCallback(
+    (item: Omit<ActivityItem, "id" | "at"> & { id?: string }) => {
+      const full: ActivityItem = {
+        id: item.id || `act_${Date.now()}`,
+        at: Date.now(),
+        userText: item.userText,
+        assistantText: item.assistantText,
+        intentId: item.intentId,
+        txHash: item.txHash,
+        status: item.status,
+        error: item.error,
+      };
+      setActivity((prev) => [full, ...prev].slice(0, 40));
+    },
+    [],
+  );
 
-  const speak = useCallback(async (text: string) => {
-    try {
-      const res = await fetch("/api/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (res.ok && res.status !== 204) {
-        const blob = await res.blob();
-        if (blob.size > 0) {
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          await audio.play();
-          URL.revokeObjectURL(url);
-          return;
-        }
-      }
-    } catch {
-      /* fall through to browser TTS */
-    }
+  const speak = useCallback((text: string) => {
     try {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text.slice(0, 900));
-        utter.rate = 1.02;
+        const utter = new SpeechSynthesisUtterance(text.slice(0, 400));
+        utter.rate = 1.12;
         window.speechSynthesis.speak(utter);
       }
     } catch {
-      /* TTS optional */
+      /* optional */
     }
+  }, []);
+
+  const openCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      camStreamRef.current = stream;
+      setCameraOn(true);
+      return true;
+    } catch {
+      setError("Camera permission denied.");
+      return false;
+    }
+  }, []);
+
+  const closeCamera = useCallback(() => {
+    camStreamRef.current?.getTracks().forEach((t) => t.stop());
+    camStreamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
+  }, []);
+
+  useEffect(() => {
+    if (cameraOn && videoRef.current && camStreamRef.current) {
+      videoRef.current.srcObject = camStreamRef.current;
+      void videoRef.current.play();
+    }
+  }, [cameraOn]);
+
+  useEffect(() => {
+    return () => {
+      camStreamRef.current?.getTracks().forEach((t) => t.stop());
+      recognitionRef.current?.stop();
+    };
   }, []);
 
   const runChat = useCallback(
     async (userText: string) => {
+      const text = userText.trim();
+      if (!text) return;
+
       setBusy(true);
       setError(null);
+      setStatus("");
+      setTranscript(text);
       setReply("");
-      setTranscript(userText);
-      pushActivity({ userText, status: "pending" });
+
+      if (!awake) {
+        if (isWake(text)) {
+          setAwake(true);
+          const line = "Hello sir, ready to assist";
+          setReply(line);
+          pushActivity({ userText: text, assistantText: line, status: "info" });
+          speak(line);
+          setBusy(false);
+          return;
+        }
+        setBusy(false);
+        return;
+      }
+
+      if (/open (the )?camera|start camera|show camera|enable camera/i.test(text)) {
+        const ok = await openCamera();
+        const line = ok
+          ? "Camera feed online."
+          : "I could not access the camera. Allow permission in the browser.";
+        setReply(line);
+        pushActivity({
+          userText: text,
+          assistantText: line,
+          status: ok ? "info" : "error",
+        });
+        speak(line);
+        setBusy(false);
+        return;
+      }
+      if (/close (the )?camera|stop camera|hide camera|disable camera/i.test(text)) {
+        closeCamera();
+        const line = "Camera feed closed.";
+        setReply(line);
+        pushActivity({ userText: text, assistantText: line, status: "info" });
+        speak(line);
+        setBusy(false);
+        return;
+      }
+      if (/go (to )?sleep|standby|good ?night jarvis|lock jarvis/i.test(text)) {
+        closeCamera();
+        setAwake(false);
+        const line = "Entering standby.";
+        setReply(line);
+        pushActivity({ userText: text, assistantText: line, status: "info" });
+        speak(line);
+        setBusy(false);
+        return;
+      }
+
+      // Local laptop actions (desktop agent on localhost:3847)
+      const local = parseLocalAction(text);
+      if (local) {
+        setStatus("working");
+        const online = await agentHealth();
+        if (!online) {
+          const line =
+            "Desktop agent is offline. Run: pnpm agent  (keep that terminal open)";
+          setReply(line);
+          setError(line);
+          pushActivity({ userText: text, assistantText: line, status: "error" });
+          speak(line);
+          setBusy(false);
+          setStatus("");
+          return;
+        }
+        try {
+          const result = await executeLocalAction(local);
+          if (!result.ok) {
+            throw new Error(result.error || "Action failed");
+          }
+          const line = result.did || local.summary;
+          setReply(line);
+          pushActivity({ userText: text, assistantText: line, status: "info" });
+          speak(line);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Local action failed";
+          setError(msg);
+          setReply(msg);
+          pushActivity({ userText: text, status: "error", error: msg });
+          speak(msg);
+        } finally {
+          setBusy(false);
+          setStatus("");
+        }
+        return;
+      }
+
+      pushActivity({ userText: text, status: "pending" });
+      setStatus("working");
 
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            message: userText,
+            message: text,
             walletAddress,
             chainId,
           }),
@@ -107,138 +235,162 @@ export function Assistant({
           intent?: UnsignedIntent | null;
         };
 
-        setReply(data.text);
         if (data.intent) setIntent(data.intent);
-
+        setReply(data.text || "");
         pushActivity({
-          userText,
+          userText: text,
           assistantText: data.text,
           intentId: data.intent?.id,
           status: data.intent ? "pending" : "info",
         });
-
-        if (data.text) void speak(data.text);
+        if (data.text) speak(data.text);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Something went wrong";
         setError(msg);
-        pushActivity({ userText, status: "error", error: msg });
-        void speak(`Error. ${msg}`);
+        pushActivity({ userText: text, status: "error", error: msg });
+        speak(`Error. ${msg}`);
       } finally {
+        setStatus("");
         setBusy(false);
       }
     },
-    [walletAddress, chainId, pushActivity, speak],
+    [awake, walletAddress, chainId, pushActivity, speak, openCamera, closeCamera],
   );
 
   const stopListening = useCallback(() => {
-    const rec = mediaRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
     setListening(false);
   }, []);
 
   const startListening = useCallback(async () => {
     setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mediaRef.current = recorder;
+    type Rec = {
+      lang: string;
+      interimResults: boolean;
+      maxAlternatives: number;
+      continuous: boolean;
+      start: () => void;
+      stop: () => void;
+      onresult: ((event: {
+        results: ArrayLike<ArrayLike<{ transcript: string }>>;
+      }) => void) | null;
+      onerror: (() => void) | null;
+      onend: (() => void) | null;
+    };
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        if (blob.size < 500) {
-          setError("No audio captured. Hold the mic and speak.");
-          return;
-        }
-        setBusy(true);
-        try {
-          const form = new FormData();
-          form.append("audio", blob, "speech.webm");
-          const res = await fetch("/api/transcribe", { method: "POST", body: form });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Transcription failed" }));
-            throw new Error(err.error || "Transcription failed");
-          }
-          const { text } = (await res.json()) as { text: string };
-          if (!text?.trim()) {
-            setError("Could not understand audio. Try again.");
-            setBusy(false);
-            return;
-          }
-          await runChat(text.trim());
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "Mic error";
-          setError(msg);
-          setBusy(false);
-        }
-      };
-
-      recorder.start();
-      setListening(true);
-    } catch {
-      setError("Microphone permission denied.");
+    const w = window as unknown as {
+      SpeechRecognition?: new () => Rec;
+      webkitSpeechRecognition?: new () => Rec;
+    };
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) {
+      setError('Voice needs Chrome or Edge. Type "Hello Jarvis" instead.');
+      return;
     }
+
+    const recognition = new SR();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
+    setListening(true);
+
+    recognition.onresult = (event) => {
+      const said = event.results[0]?.[0]?.transcript?.trim();
+      setListening(false);
+      recognitionRef.current = null;
+      if (said) void runChat(said);
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      recognitionRef.current = null;
+      setError("Mic error. Type instead.");
+    };
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.start();
   }, [runChat]);
 
-  useEffect(() => {
-    return () => {
-      mediaRef.current?.stream.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
+  const toggleListening = useCallback(() => {
+    if (busy) return;
+    if (listening) stopListening();
+    else void startListening();
+  }, [busy, listening, startListening, stopListening]);
 
   return (
-    <div className="flex w-full flex-col items-center gap-5">
+    <div className="flex w-full flex-col items-center gap-6">
       <div className="relative flex flex-col items-center">
+        {listening && (
+          <motion.span
+            className="pointer-events-none absolute inset-0 -m-4 rounded-full border border-signal/30"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: [0.35, 0.8, 0.35], scale: [1, 1.08, 1] }}
+            transition={{ duration: 1.3, repeat: Infinity }}
+          />
+        )}
         <ArcCore listening={listening} busy={busy} />
         <button
           type="button"
           disabled={busy}
-          onMouseDown={() => void startListening()}
-          onMouseUp={stopListening}
-          onMouseLeave={() => listening && stopListening()}
-          onTouchStart={(e) => {
-            e.preventDefault();
-            void startListening();
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            stopListening();
-          }}
-          className="absolute top-1/2 z-10 flex h-24 w-24 -translate-y-1/2 items-center justify-center rounded-full border border-cyan-300/40 bg-slate-950/50 backdrop-blur-sm transition hover:border-cyan-200 disabled:opacity-60"
-          aria-label="Hold to talk"
+          onClick={toggleListening}
+          className="absolute top-1/2 z-10 flex h-24 w-24 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-panel/85 shadow-glow backdrop-blur-md transition hover:border-signal/50 disabled:opacity-60"
+          aria-label="Tap to talk"
         >
-          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-cyan-200">
-            {listening ? "listen" : busy ? "think" : "hold"}
+          <span className="font-mono text-xs uppercase tracking-[0.25em] text-signal">
+            {listening ? "listen" : busy ? "think" : "mic"}
           </span>
         </button>
       </div>
 
-      <p className="font-mono text-xs uppercase tracking-[0.25em] text-cyan-200/60">
-        Hold to talk · or type below
+      <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-mist/75">
+        {listening
+          ? "Listening..."
+          : busy || status
+            ? "Working..."
+            : awake
+              ? "Tap mic or type below"
+              : 'Say "Hello Jarvis"'}
       </p>
 
-      <div className="flex w-full flex-wrap justify-center gap-2">
-        {[
-          "Check my balance on Base",
-          "What can you do on Rootstock?",
-          "Show my recent transfers on Sepolia",
-        ].map((hint) => (
+      {cameraOn && (
+        <div className="relative w-full overflow-hidden rounded-2xl border border-signal/25 shadow-glow">
+          <video
+            ref={videoRef}
+            className="aspect-video w-full bg-black object-cover"
+            muted
+            playsInline
+          />
+          <div className="pointer-events-none absolute inset-0 border border-signal/10" />
           <button
-            key={hint}
             type="button"
-            disabled={busy}
-            onClick={() => void runChat(hint)}
-            className="rounded border border-cyan-500/25 bg-cyan-950/30 px-3 py-1.5 font-mono text-[11px] text-cyan-100/80 transition hover:border-cyan-300/50 hover:text-white disabled:opacity-50"
+            onClick={closeCamera}
+            className="absolute bottom-3 right-3 rounded-xl bg-black/70 px-3 py-1.5 text-xs text-white/80"
           >
-            {hint}
+            Close
           </button>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {awake && (
+        <div className="flex w-full flex-wrap justify-center gap-2">
+          {["Open Chrome", "Open VS Code", "Open my project", "Open camera"].map(
+            (hint) => (
+            <button
+              key={hint}
+              type="button"
+              disabled={busy}
+              onClick={() => void runChat(hint)}
+              className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-mist transition hover:border-signal/40 hover:text-white disabled:opacity-50"
+            >
+              {hint}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form
         className="flex w-full gap-2"
@@ -253,76 +405,77 @@ export function Assistant({
         <input
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
-          placeholder={
-            isConnected
-              ? 'e.g. "check my balance on Base"'
-              : "Connect wallet, then ask JARVIS…"
-          }
-          className="flex-1 rounded border border-cyan-500/30 bg-slate-950/70 px-4 py-3 font-sans text-sm text-white outline-none ring-cyan-400/30 placeholder:text-slate-500 focus:ring-2"
+          placeholder={awake ? "Ask JARVIS..." : "Hello Jarvis"}
+          className="flex-1 rounded-xl border border-white/10 bg-panel/80 px-4 py-3 text-sm text-white outline-none ring-signal/40 placeholder:text-mist/50 focus:ring-2"
         />
         <button
           type="submit"
           disabled={busy || !textInput.trim()}
-          className="rounded bg-cyan-400 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-slate-950 disabled:opacity-50"
+          className="rounded-xl bg-copper px-4 py-3 text-sm font-medium text-ink disabled:opacity-50"
         >
           Send
         </button>
       </form>
 
-      <div className="w-full space-y-2 text-left">
-        {transcript && (
-          <p className="font-mono text-xs text-slate-400">
-            <span className="text-cyan-300/80">you · </span>
+      {error && (
+        <p className="w-full rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2 text-left text-sm text-red-200">
+          {error}
+        </p>
+      )}
+
+      <div className="w-full space-y-3 rounded-2xl border border-white/[0.06] bg-black/20 px-4 py-3 text-left backdrop-blur-sm">
+        {transcript ? (
+          <p className="font-mono text-xs text-mist">
+            <span className="text-signal/80">you · </span>
             {transcript}
           </p>
+        ) : (
+          <p className="font-mono text-xs text-mist/40">you · standing by</p>
         )}
-        {reply && (
-          <p className="text-sm leading-relaxed text-cyan-50/95">
-            <span className="font-mono text-xs text-amber-300">jarvis · </span>
+        {reply ? (
+          <p className="text-sm leading-relaxed text-white/90">
+            <span className="font-mono text-xs text-copper">jarvis · </span>
             {reply}
           </p>
-        )}
-        {error && (
-          <p className="rounded border border-red-500/30 bg-red-950/40 px-3 py-2 text-sm text-red-200">
-            {error}
+        ) : (
+          <p className="text-sm text-mist/40">
+            <span className="font-mono text-xs text-copper/50">jarvis · </span>
+            ...
           </p>
         )}
-        <p className="font-mono text-[10px] text-slate-500">
-          session soft cap · {spendCap} native · chainId {chainId || "—"}
-        </p>
       </div>
 
-      <ActionPreview
-        intent={intent}
-        spendCap={spendCap}
-        onClear={() => setIntent(null)}
-        onResolved={(result) => {
-          if (result.status === "confirmed") {
-            pushActivity({
-              userText: intent?.summary || "action",
-              assistantText: `Tx ${result.txHash}`,
-              intentId: intent?.id,
-              txHash: result.txHash,
-              status: "confirmed",
-            });
-            void speak("Transaction submitted.");
-          } else if (result.status === "rejected") {
-            pushActivity({
-              userText: intent?.summary || "action",
-              status: "rejected",
-            });
-          } else {
-            pushActivity({
-              userText: intent?.summary || "action",
-              status: "error",
-              error: result.error,
-            });
-          }
-          setIntent(null);
-        }}
-      />
-
-      <ActivityFeed items={activity} />
+      {awake && intent && (
+        <ActionPreview
+          intent={intent}
+          spendCap={spendCap}
+          onClear={() => setIntent(null)}
+          onResolved={(result) => {
+            if (result.status === "confirmed") {
+              pushActivity({
+                userText: intent.summary || "action",
+                assistantText: `Tx ${result.txHash}`,
+                intentId: intent.id,
+                txHash: result.txHash,
+                status: "confirmed",
+              });
+              speak("Transaction submitted.");
+            } else if (result.status === "rejected") {
+              pushActivity({
+                userText: intent.summary || "action",
+                status: "rejected",
+              });
+            } else {
+              pushActivity({
+                userText: intent.summary || "action",
+                status: "error",
+                error: result.error,
+              });
+            }
+            setIntent(null);
+          }}
+        />
+      )}
     </div>
   );
 }

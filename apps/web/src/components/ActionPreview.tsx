@@ -191,7 +191,7 @@ export function ActionPreview({ intent, spendCap, onClear, onResolved }: Props) 
           </dl>
           {overCap && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-100">
-              Amount exceeds session soft cap ({spendCap}). You can still confirm — double-check the
+              Amount exceeds session soft cap ({spendCap}). You can still confirm. Double-check the
               figure.
             </p>
           )}
