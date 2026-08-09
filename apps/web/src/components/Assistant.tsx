@@ -11,6 +11,12 @@ import {
   executeLocalAction,
   parseLocalAction,
 } from "@/lib/localActions";
+import {
+  CAPABILITIES_FULL,
+  CAPABILITIES_SPOKEN,
+  isCapabilitiesQuestion,
+} from "@/lib/capabilities";
+import { formatISTReply, isDateTimeQuestion } from "@/lib/datetime";
 
 type Props = {
   walletAddress?: Address;
@@ -19,8 +25,8 @@ type Props = {
   spendCap: string;
 };
 
-const WAKE =
-  /\b(hello|hey|hi|ok|okay)\s+jarvis\b|\bjarvis\s+(hello|hey|hi)\b/i;
+/** Only "Hello Jarvis" (optional comma / trailing punctuation) wakes from standby. */
+const WAKE = /^\s*hello\s*,?\s*jarvis\s*[.!?]?\s*$/i;
 
 function isWake(text: string) {
   return WAKE.test(text.trim());
@@ -45,7 +51,11 @@ export function Assistant({
   const [status, setStatus] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const recognitionRef = useRef<{ stop: () => void; abort?: () => void } | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordModeRef = useRef(false);
 
   const pushActivity = useCallback(
     (item: Omit<ActivityItem, "id" | "at"> & { id?: string }) => {
@@ -109,7 +119,17 @@ export function Assistant({
   useEffect(() => {
     return () => {
       camStreamRef.current?.getTracks().forEach((t) => t.stop());
-      recognitionRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        mediaRecorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
     };
   }, []);
 
@@ -118,25 +138,27 @@ export function Assistant({
       const text = userText.trim();
       if (!text) return;
 
+      // Standby: ignore everything until exact wake phrase
+      if (!awake) {
+        if (!isWake(text)) return;
+        setBusy(true);
+        setError(null);
+        setStatus("");
+        setTranscript(text);
+        setAwake(true);
+        const line = "Hello sir, ready to assist";
+        setReply(line);
+        pushActivity({ userText: text, assistantText: line, status: "info" });
+        speak(line);
+        setBusy(false);
+        return;
+      }
+
       setBusy(true);
       setError(null);
       setStatus("");
       setTranscript(text);
       setReply("");
-
-      if (!awake) {
-        if (isWake(text)) {
-          setAwake(true);
-          const line = "Hello sir, ready to assist";
-          setReply(line);
-          pushActivity({ userText: text, assistantText: line, status: "info" });
-          speak(line);
-          setBusy(false);
-          return;
-        }
-        setBusy(false);
-        return;
-      }
 
       if (/open (the )?camera|start camera|show camera|enable camera/i.test(text)) {
         const ok = await openCamera();
@@ -173,6 +195,27 @@ export function Assistant({
         return;
       }
 
+      // Capability / limits briefing (no LLM needed)
+      if (isCapabilitiesQuestion(text)) {
+        const line = CAPABILITIES_FULL;
+        setReply(line);
+        pushActivity({ userText: text, assistantText: line, status: "info" });
+        speak(CAPABILITIES_SPOKEN);
+        setBusy(false);
+        return;
+      }
+
+      // Date / time in Indian Standard Time
+      const when = isDateTimeQuestion(text);
+      if (when) {
+        const line = formatISTReply(when);
+        setReply(line);
+        pushActivity({ userText: text, assistantText: line, status: "info" });
+        speak(line);
+        setBusy(false);
+        return;
+      }
+
       // Local laptop actions (desktop agent on localhost:3847)
       const local = parseLocalAction(text);
       if (local) {
@@ -190,7 +233,27 @@ export function Assistant({
           return;
         }
         try {
-          const result = await executeLocalAction(local);
+          if (local.risky) {
+            const ok = window.confirm(
+              `${local.summary}?\n\nThis affects your whole PC. Continue?`,
+            );
+            if (!ok) {
+              const line = "Cancelled.";
+              setReply(line);
+              pushActivity({
+                userText: text,
+                assistantText: line,
+                status: "info",
+              });
+              speak(line);
+              setBusy(false);
+              setStatus("");
+              return;
+            }
+          }
+          const result = await executeLocalAction(local, {
+            confirm: local.risky === true,
+          });
           if (!result.ok) {
             throw new Error(result.error || "Action failed");
           }
@@ -258,6 +321,23 @@ export function Assistant({
   );
 
   const stopListening = useCallback(() => {
+    if (recordModeRef.current) {
+      const rec = mediaRecorderRef.current;
+      if (rec && rec.state !== "inactive") {
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
+      } else {
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        recordModeRef.current = false;
+        setListening(false);
+      }
+      return;
+    }
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -267,7 +347,106 @@ export function Assistant({
     setListening(false);
   }, []);
 
-  const startListening = useCallback(async () => {
+  /** Tray / Electron: record mic locally, transcribe via Gemini (Web Speech is broken in Electron). */
+  const startRecordListen = useCallback(async () => {
+    setError(null);
+    if (typeof MediaRecorder === "undefined") {
+      setError("Audio recording not supported here. Type instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+      recordModeRef.current = true;
+
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      setListening(true);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        setListening(false);
+        recordModeRef.current = false;
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+
+        const chunks = audioChunksRef.current;
+        audioChunksRef.current = [];
+        if (!chunks.length) return;
+
+        const raw = new Blob(chunks, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        if (raw.size < 800) return;
+
+        setBusy(true);
+        setStatus("working");
+        setError(null);
+        try {
+          // Electron bug: streaming MediaRecorder blobs into fetch FormData
+          // throws chunked_data_pipe OnSizeReceived Error -2. Re-wrap with known size.
+          const buffer = await raw.arrayBuffer();
+          const file = new File([buffer], "jarvis-mic.webm", {
+            type: "audio/webm",
+          });
+          const form = new FormData();
+          form.append("audio", file);
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            body: form,
+            cache: "no-store",
+          });
+          const data = (await res.json()) as { text?: string; error?: string };
+          if (!res.ok) throw new Error(data.error || "Transcription failed");
+          const said = (data.text || "").trim();
+          if (!said) {
+            setError("Did not catch that. Tap mic and speak again.");
+            setBusy(false);
+            setStatus("");
+            return;
+          }
+          setStatus("");
+          void runChat(said);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Mic transcription failed");
+          setBusy(false);
+          setStatus("");
+        }
+      };
+
+      // timeslice so chunks flush cleanly before stop (helps Electron uploads)
+      recorder.start(250);
+      window.setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          try {
+            mediaRecorderRef.current.requestData();
+            mediaRecorderRef.current.stop();
+          } catch {
+            /* ignore */
+          }
+        }
+      }, 6000);
+    } catch {
+      recordModeRef.current = false;
+      setListening(false);
+      setError("Allow microphone access, then try again.");
+    }
+  }, [runChat]);
+
+  /** Chrome / Edge browser: Web Speech API (fast). */
+  const startWebSpeechListen = useCallback(async () => {
     setError(null);
 
     type RecEvent = {
@@ -293,11 +472,11 @@ export function Assistant({
     };
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) {
-      setError('Voice needs Chrome or Edge. Type "Hello Jarvis" instead.');
+      // No Web Speech — use recorder path
+      void startRecordListen();
       return;
     }
 
-    // Ask for mic permission first (avoids fake errors)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
@@ -306,9 +485,8 @@ export function Assistant({
       return;
     }
 
-    // Stop any previous session quietly
     try {
-      recognitionRef.current?.abort();
+      recognitionRef.current?.abort?.();
     } catch {
       /* ignore */
     }
@@ -319,6 +497,7 @@ export function Assistant({
     recognition.maxAlternatives = 1;
     recognition.continuous = false;
     recognitionRef.current = recognition;
+    recordModeRef.current = false;
     setListening(true);
 
     recognition.onresult = (event) => {
@@ -333,17 +512,16 @@ export function Assistant({
       setListening(false);
       recognitionRef.current = null;
 
-      // These are normal, not real failures
       if (code === "aborted" || code === "no-speech") return;
       if (code === "not-allowed" || code === "service-not-allowed") {
-        setError("Microphone blocked. Click the lock icon in the address bar and allow mic.");
+        setError("Microphone blocked. Allow mic, then try again.");
         return;
       }
       if (code === "network") {
-        setError("Speech needs internet in Chrome. Check connection, or just type.");
+        // Auto-fallback: works in tray / offline-Google cases
+        void startRecordListen();
         return;
       }
-      // Anything else: stay quiet unless it's audio-capture
       if (code === "audio-capture") {
         setError("No microphone found.");
       }
@@ -359,8 +537,19 @@ export function Assistant({
     } catch {
       setListening(false);
       recognitionRef.current = null;
+      void startRecordListen();
     }
-  }, [runChat]);
+  }, [runChat, startRecordListen]);
+
+  const startListening = useCallback(async () => {
+    const inElectron = navigator.userAgent.includes("Electron");
+    if (inElectron) {
+      // Dream path: tray window voice without Chrome Web Speech
+      await startRecordListen();
+      return;
+    }
+    await startWebSpeechListen();
+  }, [startRecordListen, startWebSpeechListen]);
 
   const toggleListening = useCallback(() => {
     if (busy) return;
@@ -384,11 +573,11 @@ export function Assistant({
           type="button"
           disabled={busy}
           onClick={toggleListening}
-          className="absolute top-1/2 z-10 flex h-24 w-24 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-panel/85 shadow-glow backdrop-blur-md transition hover:border-signal/50 disabled:opacity-60"
+          className="absolute left-1/2 top-1/2 z-10 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
           aria-label="Tap to talk"
         >
-          <span className="font-mono text-xs uppercase tracking-[0.25em] text-signal">
-            {listening ? "listen" : busy ? "think" : "mic"}
+          <span className="pointer-events-none font-mono text-[10px] uppercase tracking-[0.28em] text-ink">
+            {listening ? "on" : busy ? "…" : "mic"}
           </span>
         </button>
       </div>
@@ -397,10 +586,12 @@ export function Assistant({
         {listening
           ? "Listening..."
           : busy || status
-            ? "Working..."
+            ? status === "working"
+              ? "Transcribing..."
+              : "Working..."
             : awake
-              ? "Tap mic or type below"
-              : 'Say "Hello Jarvis"'}
+              ? "Online"
+              : "Standby"}
       </p>
 
       {cameraOn && (
@@ -419,23 +610,6 @@ export function Assistant({
           >
             Close
           </button>
-        </div>
-      )}
-
-      {awake && (
-        <div className="flex w-full flex-wrap justify-center gap-2">
-          {["Open Chrome", "Open VS Code", "Open my project", "Open camera"].map(
-            (hint) => (
-            <button
-              key={hint}
-              type="button"
-              disabled={busy}
-              onClick={() => void runChat(hint)}
-              className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-mist transition hover:border-signal/40 hover:text-white disabled:opacity-50"
-            >
-              {hint}
-            </button>
-          ))}
         </div>
       )}
 
@@ -470,7 +644,7 @@ export function Assistant({
         </p>
       )}
 
-      <div className="w-full space-y-3 rounded-2xl border border-white/[0.06] bg-black/20 px-4 py-3 text-left backdrop-blur-sm">
+      <div className="panel-glass w-full space-y-3 rounded-2xl px-4 py-3 text-left">
         {transcript ? (
           <p className="font-mono text-xs text-mist">
             <span className="text-signal/80">you · </span>

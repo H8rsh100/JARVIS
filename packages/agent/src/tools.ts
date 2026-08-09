@@ -391,7 +391,7 @@ export function createJarvisTools(ctx: {
           chainId: chainByKey[chainKey].id,
           summary: `Deploy SimpleVault (owner ${ownerAddr}) on ${chainByKey[chainKey].name}`,
           bytecode: SIMPLE_VAULT_BYTECODE,
-          abi: SIMPLE_VAULT_ABI as unknown[],
+          abi: SIMPLE_VAULT_ABI as unknown as unknown[],
           constructorArgs: [ownerAddr],
           data: encodeDeployData({
             abi: SIMPLE_VAULT_ABI,

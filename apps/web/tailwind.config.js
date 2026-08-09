@@ -4,14 +4,14 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        ink: "#070b12",
-        mist: "#9fb0c3",
+        ink: "#05080f",
+        mist: "#8fa3b8",
         copper: "#c47a3a",
         signal: "#3dd6c6",
-        panel: "#0e1522",
+        "signal-bright": "#7ef0e4",
+        panel: "#0a101c",
       },
       fontFamily: {
-        display: ["var(--font-display)", "Georgia", "serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },

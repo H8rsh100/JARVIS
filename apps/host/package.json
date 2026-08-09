@@ -1,0 +1,16 @@
+{
+  "name": "@jarvis/host",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JARVIS local host — boots agent + UI, system tray, Windows startup",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "boot": "node src/boot.mjs",
+    "dev": "electron ."
+  },
+  "dependencies": {
+    "electron": "^33.2.1",
+    "open": "^10.1.0"
+  }
+}

@@ -3,9 +3,9 @@ import { Providers } from "@/components/Providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "JARVIS - Voice Web3 Assistant",
+  title: "J.A.R.V.I.S.",
   description:
-    "Speak blockchain actions. JARVIS prepares confirm-gated transfers, swaps, and deploys across Sepolia, Base, and Rootstock.",
+    "Local Windows voice assistant. Say Hello Jarvis, then open apps, folders, and URLs on your PC.",
 };
 
 export default function RootLayout({

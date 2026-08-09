@@ -1,0 +1,314 @@
+================================================================================
+  JARVIS — WHAT YOU SHOULD LEARN FROM THIS PROJECT
+  Your roadmap from “I built a cool demo” → “I understand the whole stack”
+================================================================================
+
+You shipped a real system: voice UI + AI chat + local Windows agent + optional
+Web3 + tray host. Below is everything worth studying, in order of payoff.
+
+
+--------------------------------------------------------------------------------
+1. THE BIG IDEA (product architecture)
+--------------------------------------------------------------------------------
+
+Learn this first — it is the hiring story:
+
+  Browser alone CANNOT control your laptop.
+  So you split into layers:
+
+  [ Voice / UI ]  →  Next.js web app (apps/web)
+  [ Brain ]       →  LLM API routes (Gemini / OpenAI via Vercel AI SDK)
+  [ Hands ]       →  Desktop agent on 127.0.0.1:3847 (apps/desktop-agent)
+  [ Shell ]       →  Electron tray host (apps/host) starts both + tray icon
+
+Keywords to master:
+  - localhost / loopback (127.0.0.1)
+  - client vs server
+  - allowlist vs full system access
+  - wake phrase / standby state machine
+  - confirm-gated risky actions
+
+Why companies care:
+  You did not “make a chatbot webpage.” You designed a local agent with safety
+  boundaries. That is systems thinking.
+
+
+--------------------------------------------------------------------------------
+2. MONOREPO + TOOLING
+--------------------------------------------------------------------------------
+
+Study files:
+  - package.json (root scripts: pnpm jarvis, pnpm agent, pnpm dev)
+  - pnpm-workspace.yaml
+  - apps/* and packages/*
+
+Learn:
+  - What a monorepo is and why (shared packages, one install)
+  - pnpm workspaces + --filter
+  - package boundaries: @jarvis/web, @jarvis/desktop-agent, @jarvis/host,
+    @jarvis/agent, @jarvis/chains
+  - .env.local vs committing secrets (never commit real API keys)
+  - scripts as product UX (one command to demo)
+
+Practice:
+  Explain out loud: “pnpm jarvis starts X, which starts Y and Z.”
+
+
+--------------------------------------------------------------------------------
+3. NEXT.JS APP ROUTER (frontend shell)
+--------------------------------------------------------------------------------
+
+Study files:
+  - apps/web/src/app/layout.tsx
+  - apps/web/src/app/page.tsx
+  - apps/web/src/app/globals.css
+  - apps/web/next.config.js
+  - apps/web/tailwind.config.js
+
+Learn:
+  - App Router: app/page.tsx = route
+  - Client components ("use client") vs Server Components
+  - API routes under app/api/*/route.ts (server-side Node)
+  - env vars: NEXT_PUBLIC_* (browser) vs server-only secrets
+  - Tailwind tokens (signal, copper, mist) + custom CSS atmosphere
+  - Absolute positioning HUD layers (z-index, pointer-events-none)
+  - Framer Motion for intentional motion (not random fluff)
+
+UI concepts you practiced:
+  - Brand-first hero (J.A.R.V.I.S. title)
+  - Decorative assets with transparent backgrounds
+  - Left rail / right rail HUD composition
+  - Keeping interactive center (mic) clear of decoration
+
+
+--------------------------------------------------------------------------------
+4. VOICE + ASSISTANT STATE MACHINE (core product logic)
+--------------------------------------------------------------------------------
+
+Study file (most important frontend file):
+  - apps/web/src/components/Assistant.tsx
+
+Learn:
+  - Web Speech API (SpeechRecognition) — browser STT, Chrome/Edge
+  - speechSynthesis — browser TTS
+  - Wake phrase gating: asleep until exact “Hello Jarvis”
+  - Standby → awake → commands → sleep again
+  - Fast path: regex / parsers before calling the LLM (localActions)
+  - Busy / listening / error UX states
+  - Camera via getUserMedia (browser permission model)
+
+Why this matters:
+  Real assistants are state machines, not “always chat.”
+  Interview gold: draw the state diagram on a whiteboard.
+
+
+--------------------------------------------------------------------------------
+5. LOCAL ACTIONS PIPELINE (how the laptop gets controlled)
+--------------------------------------------------------------------------------
+
+Study files:
+  - apps/web/src/lib/localActions.ts
+  - apps/desktop-agent/src/server.js
+
+Flow to memorize:
+
+  User says “Open Chrome”
+    → parseLocalAction() maps NL → { kind, target }
+    → fetch http://127.0.0.1:3847/execute
+    → Express agent runs Windows cmd (start chrome, explorer, etc.)
+    → UI speaks/shows result
+
+Learn:
+  - Express HTTP API design (GET /health, POST /execute)
+  - CORS for local UI → local agent
+  - Binding to 127.0.0.1 only (security: not exposed to LAN/internet)
+  - child_process exec / cmd /c on Windows
+  - Allowlists (APP_MAP) vs open-ended shell
+  - confirm:true for risky kinds (shell / kill)
+  - Deny-lists for destructive patterns
+
+Practice:
+  Add one new app to APP_MAP + APP_ALIASES end-to-end.
+  That single exercise teaches the whole pipeline.
+
+
+--------------------------------------------------------------------------------
+6. AI / LLM INTEGRATION
+--------------------------------------------------------------------------------
+
+Study files:
+  - apps/web/src/app/api/chat/route.ts
+  - apps/web/src/app/api/transcribe/route.ts
+  - apps/web/src/app/api/speak/route.ts
+  - packages/agent/src/* (tools, prompts, types)
+
+Learn:
+  - Vercel AI SDK (generateText, tool calling)
+  - Provider abstraction (Google Gemini first, OpenAI fallback)
+  - System prompts and tool schemas
+  - Fast “demoReply” path when model is slow / unused
+  - Separating “chat answer” from “executable intent”
+  - Why keys stay on the server (API routes), not in the browser
+
+Concepts:
+  - STT (speech → text), LLM (text → plan/reply), TTS (text → speech)
+  - Tool calling / function calling for structured actions
+  - Latency: local regex first, LLM second
+
+
+--------------------------------------------------------------------------------
+7. OPTIONAL WEB3 LAYER (still in the repo)
+--------------------------------------------------------------------------------
+
+Study files:
+  - apps/web/src/lib/wagmi.ts
+  - apps/web/src/components/WalletButton.tsx
+  - apps/web/src/components/ActionPreview.tsx
+  - packages/chains/*
+  - packages/agent/src/tools.ts
+  - contracts/ (SimpleVault Solidity)
+
+Learn:
+  - wagmi + viem wallet connection
+  - chain IDs / testnets (Sepolia, Base Sepolia, Rootstock)
+  - Unsigned intents + user confirms in wallet (JARVIS never holds keys)
+  - Reading balances vs preparing writes
+  - Why Web3 was demoted: browsers cannot control the OS; wallet UX is not
+    the hiring demo for “laptop JARVIS”
+
+Mental model:
+  Web3 path = optional brain tools
+  Desktop agent = the real hands on Windows
+
+
+--------------------------------------------------------------------------------
+8. DESKTOP HOST / TRAY APP
+--------------------------------------------------------------------------------
+
+Study files:
+  - apps/host/src/main.cjs
+  - apps/host/src/boot.mjs
+  - apps/host/package.json
+
+Learn:
+  - Electron tray + BrowserWindow loading localhost
+  - Spawning child processes (pnpm agent + pnpm web)
+  - Global hotkey (Ctrl+Shift+J)
+  - Login item / Start with Windows
+  - Graceful shutdown (taskkill tree on Windows)
+  - Headless boot fallback (jarvis:boot) vs full tray (jarvis)
+
+Why it matters:
+  Turns “two terminals + browser” into “an app on my machine.”
+
+
+--------------------------------------------------------------------------------
+9. SECURITY MODEL (say this in interviews)
+--------------------------------------------------------------------------------
+
+You should be able to explain:
+
+  1. Agent listens only on 127.0.0.1
+  2. Actions are allowlisted (known apps / folders / URLs)
+  3. Risky shell needs explicit confirm
+  4. Dangerous command patterns are blocked
+  5. Browser cannot bypass the agent
+  6. API keys stay server-side
+  7. Wallet signing stays in the user’s wallet
+
+This is the difference between a toy and a responsible agent.
+
+
+--------------------------------------------------------------------------------
+10. DESIGN / FRONTEND CRAFT
+--------------------------------------------------------------------------------
+
+Study:
+  - apps/web/src/components/ArcCore.tsx
+  - apps/web/src/components/StarkHudRails.tsx
+  - apps/web/src/app/globals.css
+  - public/suit-hud.png, public/core-orb.png
+
+Learn:
+  - HUD composition without cluttering the mic
+  - CSS variables for brand colors
+  - Asset prep: knock out backgrounds, circular masks, mix-blend-screen
+  - Motion with purpose (reactor spin, scan, matrix pulse)
+  - Responsive: hide side rails on small screens (xl:)
+
+Taste lesson:
+  Decoration fill empty space; they must never fight the primary interaction.
+
+
+--------------------------------------------------------------------------------
+11. SUGGESTED LEARNING ORDER (do this)
+--------------------------------------------------------------------------------
+
+Week-style path (adjust to your pace):
+
+  Day 1  — Draw the architecture diagram from memory
+  Day 2  — Trace one voice command through Assistant → localActions → agent
+  Day 3  — Read Express server.js line by line; add one new app
+  Day 4  — Read chat/route.ts; swap or explain Gemini vs OpenAI selection
+  Day 5  — Break the wake phrase on purpose; fix it; write the state machine
+  Day 6  — Read host/main.cjs; explain tray + child process lifecycle
+  Day 7  — Optional: one Web3 tool path (balance read) end to end
+  Day 8  — Write a 90-second demo script you can present without notes
+
+Stretch goals (level-up projects):
+  - Add “close Chrome” / process focus
+  - File search in a folder (still allowlisted)
+  - Global push-to-talk hotkey even when window hidden
+  - Package Electron into a real .exe installer
+  - Persist chat history locally
+  - Unit tests for parseLocalAction()
+
+
+--------------------------------------------------------------------------------
+12. GLOSSARY (own these words)
+--------------------------------------------------------------------------------
+
+  Monorepo          Multiple packages in one git repo
+  Workspace         pnpm/npm linking between packages
+  App Router        Next.js file-based routing under app/
+  API route         Server endpoint in Next.js
+  SSR / CSR         Server vs client rendering
+  Loopback          127.0.0.1 — this machine only
+  Allowlist         Only permitted actions run
+  STT / TTS         Speech-to-text / text-to-speech
+  LLM               Large language model
+  Tool calling      Model returns structured function calls
+  Intent            Structured action request
+  Electron          Desktop shell around web tech
+  System tray       Always-on icon in Windows notification area
+  wagmi / viem      Ethereum wallet + RPC libraries
+  CORS              Cross-origin rules for browser fetch
+
+
+--------------------------------------------------------------------------------
+13. FILES TO KEEP OPEN WHILE LEARNING
+--------------------------------------------------------------------------------
+
+  1. apps/web/src/components/Assistant.tsx
+  2. apps/web/src/lib/localActions.ts
+  3. apps/desktop-agent/src/server.js
+  4. apps/web/src/app/api/chat/route.ts
+  5. apps/host/src/main.cjs
+  6. README.md
+
+If you truly understand those six, you understand this project.
+
+
+--------------------------------------------------------------------------------
+14. ONE-SENTENCE PORTFOLIO LINE
+--------------------------------------------------------------------------------
+
+  “I built JARVIS: a local Windows voice agent with a Stark-style Next.js UI,
+   an allowlisted localhost action runner, LLM chat, and an Electron tray host
+   — designed so the browser never gets unchecked OS access.”
+
+
+================================================================================
+  You did not just theme a landing page. You built a system.
+  Learn the system — the UI is the proof; the architecture is the skill.
+================================================================================

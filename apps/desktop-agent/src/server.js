@@ -14,9 +14,9 @@ app.use(express.json({ limit: "32kb" }));
 
 /** Known apps on Windows (extend as needed) */
 const APP_MAP = {
-  chrome: "start chrome",
-  "google chrome": "start chrome",
-  edge: "start msedge",
+      chrome: 'start "" chrome --new-window',
+      "google chrome": 'start "" chrome --new-window',
+      edge: 'start "" msedge --new-window',
   firefox: "start firefox",
   code: "code",
   "vs code": "code",
@@ -73,8 +73,11 @@ app.post("/execute", async (req, res) => {
       return res.status(400).json({ ok: false, error: "kind required" });
     }
 
-    // Destructive / shell need explicit confirm:true
-    if ((kind === "shell" || kind === "kill") && confirm !== true) {
+    // Destructive / shell / power need explicit confirm:true
+    if (
+      (kind === "shell" || kind === "kill" || kind === "power") &&
+      confirm !== true
+    ) {
       return res.status(403).json({
         ok: false,
         error: "Risky action requires confirm:true",
@@ -118,6 +121,35 @@ app.post("/execute", async (req, res) => {
       }
       await runWindows(`explorer ${quotePath(p)}`);
       return res.json({ ok: true, did: `Opened ${p}` });
+    }
+
+    if (kind === "power") {
+      const mode = String(target || "")
+        .toLowerCase()
+        .trim();
+      if (mode === "sleep") {
+        // Suspend (sleep). ForceCritical=false so apps can veto if needed.
+        await runWindows(
+          `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)"`,
+        );
+        return res.json({ ok: true, did: "PC entering sleep" });
+      }
+      if (mode === "hibernate") {
+        await runWindows("shutdown /h");
+        return res.json({ ok: true, did: "PC hibernating" });
+      }
+      if (mode === "restart") {
+        await runWindows("shutdown /r /t 0");
+        return res.json({ ok: true, did: "PC restarting" });
+      }
+      if (mode === "shutdown" || mode === "poweroff" || mode === "off") {
+        await runWindows("shutdown /s /t 0");
+        return res.json({ ok: true, did: "PC shutting down" });
+      }
+      return res.status(400).json({
+        ok: false,
+        error: 'Unknown power mode. Use sleep, hibernate, restart, or shutdown.',
+      });
     }
 
     if (kind === "shell") {

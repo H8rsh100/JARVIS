@@ -10,6 +10,8 @@ coverage
 .env.local
 .env*.local
 *.log
+.jarvis-chrome-profile
+.jarvis-*.log
 .DS_Store
 Thumbs.db
 cache

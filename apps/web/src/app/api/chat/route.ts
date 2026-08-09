@@ -4,6 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createJarvisTools, SYSTEM_PROMPT, type UnsignedIntent } from "@jarvis/agent";
 import { isAddress, type Address } from "viem";
+import { formatISTReply } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -36,10 +37,17 @@ function getModel(): { model: LanguageModel; provider: string } | null {
 function demoReply(message: string, chainId?: number): string | null {
   const m = message.toLowerCase();
   if (/hello|hi\b|hey|who are you|jarvis/.test(m)) {
-    return "Good evening. JARVIS online. Voice Web3 assistant ready. Connect a wallet and ask me to check a balance, prepare a transfer, or deploy SimpleVault.";
+    return "JARVIS online. Local laptop assistant ready. Wake is Hello Jarvis. I open allowlisted apps and folders on this PC. I do not have full system control.";
   }
-  if (/what can you|help|capabilit|do on rootstock|do on base/.test(m)) {
-    return "I can read balances, prepare native or token transfers, quote swaps on Sepolia or Base, and stage a SimpleVault deploy. Rootstock supports reads and transfers. Swaps are Sepolia and Base only. Every write waits for your wallet confirm.";
+  if (
+    /what can you|help|capabilit|limits|permissions|full (pc|computer|laptop)|can you control|can you access/.test(
+      m,
+    )
+  ) {
+    return "I can open allowlisted apps, folders, and URLs via the local desktop agent, plus camera in this UI. I cannot do full PC control, arbitrary file reads or writes, mouse or keyboard takeover, silent system settings, or unchecked shell. Optional Web3 tools stay confirm-gated in your wallet.";
+  }
+  if (/do on rootstock|do on base/.test(m)) {
+    return "On Base and Sepolia I can help with balances, transfers, and swap quotes. Rootstock supports reads and transfers; swaps are Sepolia and Base only. Every write waits for your wallet confirm.";
   }
   if (/balance/.test(m)) {
     return chainId
@@ -106,7 +114,8 @@ export async function POST(req: NextRequest) {
       model: resolved.model,
       system: `${SYSTEM_PROMPT}
 Wallet: ${walletAddress || "none"} | chainId: ${body.chainId ?? "unknown"}
-Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly witty. Never use em dashes.`,
+Clock (authoritative): ${formatISTReply("both")}
+Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly witty. Never use em dashes. For date/time questions use the Clock line above (IST).`,
       prompt: message,
       tools: needsTools ? tools : undefined,
       maxSteps: needsTools ? 2 : 1,

@@ -3,7 +3,7 @@
  */
 
 export type LocalAction = {
-  kind: "open_app" | "open_url" | "open_path" | "shell";
+  kind: "open_app" | "open_url" | "open_path" | "shell" | "power";
   target: string;
   summary: string;
   risky?: boolean;
@@ -26,6 +26,43 @@ const APP_ALIASES: Array<{ keys: RegExp; target: string; label: string }> = [
 export function parseLocalAction(text: string): LocalAction | null {
   const t = text.trim();
   if (!t) return null;
+
+  // Power: sleep / restart / shut down (PC) — not JARVIS standby
+  if (
+    /\b(shut\s*down|power\s*off|turn\s+off)\b/i.test(t) &&
+    /\b(pc|computer|laptop|system|machine|windows)?\b/i.test(t)
+  ) {
+    return {
+      kind: "power",
+      target: "shutdown",
+      summary: "Shut down this PC",
+      risky: true,
+    };
+  }
+  if (/\b(re(start|boot)|reboot)\b/i.test(t) && !/\bjarvis\b/i.test(t)) {
+    return {
+      kind: "power",
+      target: "restart",
+      summary: "Restart this PC",
+      risky: true,
+    };
+  }
+  if (
+    /\b(hibernate)\b/i.test(t) ||
+    /\b(put|send)\s+(the\s+)?(pc|computer|laptop|system|machine)\s+to\s+sleep\b/i.test(
+      t,
+    ) ||
+    /\bsleep\s+(the\s+)?(pc|computer|laptop|system|machine)\b/i.test(t) ||
+    /\b(pc|computer|laptop)\s+sleep\b/i.test(t)
+  ) {
+    const hibernate = /\bhibernate\b/i.test(t);
+    return {
+      kind: "power",
+      target: hibernate ? "hibernate" : "sleep",
+      summary: hibernate ? "Hibernate this PC" : "Sleep this PC",
+      risky: true,
+    };
+  }
 
   // URLs
   const urlMatch = t.match(/https?:\/\/\S+/i);
