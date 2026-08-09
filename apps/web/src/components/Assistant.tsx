@@ -258,13 +258,22 @@ export function Assistant({
   );
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
     recognitionRef.current = null;
     setListening(false);
   }, []);
 
   const startListening = useCallback(async () => {
     setError(null);
+
+    type RecEvent = {
+      error?: string;
+      results?: ArrayLike<ArrayLike<{ transcript: string }>>;
+    };
     type Rec = {
       lang: string;
       interimResults: boolean;
@@ -272,10 +281,9 @@ export function Assistant({
       continuous: boolean;
       start: () => void;
       stop: () => void;
-      onresult: ((event: {
-        results: ArrayLike<ArrayLike<{ transcript: string }>>;
-      }) => void) | null;
-      onerror: (() => void) | null;
+      abort: () => void;
+      onresult: ((event: RecEvent) => void) | null;
+      onerror: ((event: RecEvent) => void) | null;
       onend: (() => void) | null;
     };
 
@@ -289,6 +297,22 @@ export function Assistant({
       return;
     }
 
+    // Ask for mic permission first (avoids fake errors)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      setError("Allow microphone access in the browser address bar, then try again.");
+      return;
+    }
+
+    // Stop any previous session quietly
+    try {
+      recognitionRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+
     const recognition = new SR();
     recognition.lang = "en-US";
     recognition.interimResults = false;
@@ -298,21 +322,44 @@ export function Assistant({
     setListening(true);
 
     recognition.onresult = (event) => {
-      const said = event.results[0]?.[0]?.transcript?.trim();
+      const said = event.results?.[0]?.[0]?.transcript?.trim();
       setListening(false);
       recognitionRef.current = null;
       if (said) void runChat(said);
     };
-    recognition.onerror = () => {
+
+    recognition.onerror = (event) => {
+      const code = event.error || "";
       setListening(false);
       recognitionRef.current = null;
-      setError("Mic error. Type instead.");
+
+      // These are normal, not real failures
+      if (code === "aborted" || code === "no-speech") return;
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setError("Microphone blocked. Click the lock icon in the address bar and allow mic.");
+        return;
+      }
+      if (code === "network") {
+        setError("Speech needs internet in Chrome. Check connection, or just type.");
+        return;
+      }
+      // Anything else: stay quiet unless it's audio-capture
+      if (code === "audio-capture") {
+        setError("No microphone found.");
+      }
     };
+
     recognition.onend = () => {
       setListening(false);
       recognitionRef.current = null;
     };
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      recognitionRef.current = null;
+    }
   }, [runChat]);
 
   const toggleListening = useCallback(() => {
