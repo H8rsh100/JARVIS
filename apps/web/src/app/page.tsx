@@ -4,11 +4,15 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useChainId } from "wagmi";
 import { Assistant } from "@/components/Assistant";
 import { motion } from "framer-motion";
+import { hasValidWalletConnectId } from "@/lib/wagmi";
 
 export default function HomePage() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { data: balance } = useBalance({ address });
+  const { data: balance } = useBalance({
+    address,
+    query: { enabled: Boolean(address) },
+  });
 
   const spendCap = process.env.NEXT_PUBLIC_SESSION_SPEND_CAP || "0.05";
 
@@ -27,6 +31,11 @@ export default function HomePage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          {!hasValidWalletConnectId && (
+            <span className="hidden max-w-[14rem] truncate font-mono text-[10px] text-amber-200/80 md:inline">
+              set WalletConnect project id for WC
+            </span>
+          )}
           {isConnected && balance && (
             <span className="hidden font-mono text-xs text-mist md:inline">
               {Number(balance.formatted).toFixed(4)} {balance.symbol}

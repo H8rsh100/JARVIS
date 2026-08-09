@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["@jarvis/agent", "@jarvis/chains"],
-  experimental: {
-    serverComponentsExternalPackages: ["openai"],
-  },
+  serverExternalPackages: ["openai"],
 };
 
 module.exports = nextConfig;
