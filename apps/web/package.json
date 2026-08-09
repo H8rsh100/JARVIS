@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
@@ -17,7 +17,7 @@
     "@tanstack/react-query": "^5.66.9",
     "ai": "^4.1.46",
     "framer-motion": "^12.4.7",
-    "next": "^15.1.7",
+    "next": "15.2.4",
     "openai": "^4.85.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
