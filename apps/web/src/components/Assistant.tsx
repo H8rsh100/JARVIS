@@ -53,12 +53,26 @@ export function Assistant({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      await audio.play();
-      URL.revokeObjectURL(url);
+      if (res.ok && res.status !== 204) {
+        const blob = await res.blob();
+        if (blob.size > 0) {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          await audio.play();
+          URL.revokeObjectURL(url);
+          return;
+        }
+      }
+    } catch {
+      /* fall through to browser TTS */
+    }
+    try {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text.slice(0, 900));
+        utter.rate = 1.02;
+        window.speechSynthesis.speak(utter);
+      }
     } catch {
       /* TTS optional */
     }

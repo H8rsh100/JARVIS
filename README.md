@@ -6,7 +6,7 @@ Fresh rewrite of the Blockchain J.A.R.V.I.S idea: reliable tool-calling, confirm
 
 ## Features
 
-- **Voice + text** — hold-to-talk (Whisper STT) or type; spoken replies (OpenAI TTS)
+- **Voice + text** — hold-to-talk (Gemini audio STT) or type; spoken replies (browser TTS)
 - **Agent tools** — balances, token balances, recent transfers, transfers, ERC-20 transfers, 0x swaps, SimpleVault deploy
 - **Confirm-gated writes** — unsigned intents only; wallet signs after preview (gas estimate + session soft cap)
 - **Chains** — Ethereum Sepolia, Base Sepolia, Rootstock Testnet
@@ -17,9 +17,9 @@ Fresh rewrite of the Blockchain J.A.R.V.I.S idea: reliable tool-calling, confirm
 | Layer | Tech |
 |-------|------|
 | App | Next.js 15, TypeScript, Tailwind, Framer Motion |
-| Wallet | wagmi v2, viem, RainbowKit |
-| Agent | Vercel AI SDK + OpenAI tools |
-| Voice | Whisper STT, OpenAI TTS |
+| Wallet | wagmi v2, viem (injected browser wallets) |
+| Agent | Vercel AI SDK + Google Gemini (AI Studio) |
+| Voice | Gemini audio transcription + browser speechSynthesis |
 | Contracts | Foundry (`SimpleVault`) |
 | Monorepo | pnpm workspaces |
 
@@ -32,8 +32,7 @@ cp .env.example apps/web/.env.local
 
 Fill in:
 
-- `OPENAI_API_KEY`
-- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` ([cloud.walletconnect.com](https://cloud.walletconnect.com))
+- `GOOGLE_GENERATIVE_AI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey)
 - Optional: RPC URLs, `ZEROX_API_KEY`, `NEXT_PUBLIC_SESSION_SPEND_CAP`
 
 ```bash

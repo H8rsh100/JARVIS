@@ -1,10 +1,9 @@
 "use client";
 
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useChainId } from "wagmi";
 import { Assistant } from "@/components/Assistant";
+import { WalletButton } from "@/components/WalletButton";
 import { motion } from "framer-motion";
-import { hasValidWalletConnectId } from "@/lib/wagmi";
 
 export default function HomePage() {
   const { address, isConnected } = useAccount();
@@ -31,17 +30,12 @@ export default function HomePage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {!hasValidWalletConnectId && (
-            <span className="hidden max-w-[14rem] truncate font-mono text-[10px] text-amber-200/80 md:inline">
-              set WalletConnect project id for WC
-            </span>
-          )}
           {isConnected && balance && (
             <span className="hidden font-mono text-xs text-mist md:inline">
               {Number(balance.formatted).toFixed(4)} {balance.symbol}
             </span>
           )}
-          <ConnectButton chainStatus="icon" showBalance={false} accountStatus="address" />
+          <WalletButton />
         </div>
       </header>
 
