@@ -12,11 +12,14 @@ function googleKey(): string {
   ).trim();
 }
 
+/** Real OpenAI keys only — reject Cursor/other sk-AQ placeholders that pass a naive sk- check. */
 function openaiKey(): string {
   const k = (process.env.OPENAI_API_KEY || "").trim();
-  if (!k.startsWith("sk-") || k.includes("...") || k.includes("your_") || k.length < 20) {
-    return "";
-  }
+  if (!k) return "";
+  if (k.includes("...") || k.includes("your_") || k.length < 20) return "";
+  // Cursor / non-OpenAI keys often look like sk-AQ.… — Whisper will 401
+  if (/^sk-AQ\./i.test(k)) return "";
+  if (!/^sk-(proj-)?[A-Za-z0-9_-]+$/.test(k)) return "";
   return k;
 }
 
@@ -25,6 +28,14 @@ function normalizeMime(raw: string | undefined): string {
   if (base === "audio/webm" || base === "video/webm") return "audio/webm";
   if (base.startsWith("audio/")) return base;
   return "audio/webm";
+}
+
+function friendlyProviderError(raw: string): string {
+  // Never surface key material from provider error strings
+  if (/incorrect api key|invalid.?api.?key|401/i.test(raw)) {
+    return "STT API key rejected. Add a Google AI Studio key as GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (tray mic uses Gemini).";
+  }
+  return raw.replace(/sk-[A-Za-z0-9._-]{8,}/g, "sk-***");
 }
 
 async function transcribeWithGemini(
@@ -68,13 +79,12 @@ async function transcribeWithGemini(
 
   if (!res.ok) {
     const msg = raw.error?.message || `Gemini STT HTTP ${res.status}`;
-    // Don't scare users with "API key" when chat key is fine — usually audio/format/quota
     if (/api key|permission|unauthenticated/i.test(msg)) {
       throw new Error(
-        `Tray voice transcription was rejected by Gemini (${msg}). Typing and Chrome voice still use your normal chat key. Check AI Studio key restrictions / audio access.`,
+        "Gemini rejected the STT key. Check GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (AI Studio).",
       );
     }
-    throw new Error(msg);
+    throw new Error(friendlyProviderError(msg));
   }
 
   const text =
@@ -85,11 +95,16 @@ async function transcribeWithGemini(
 
 async function transcribeWithOpenAI(file: File, apiKey: string): Promise<string> {
   const openai = new OpenAI({ apiKey });
-  const transcription = await openai.audio.transcriptions.create({
-    file,
-    model: "whisper-1",
-  });
-  return (transcription.text || "").trim();
+  try {
+    const transcription = await openai.audio.transcriptions.create({
+      file,
+      model: "whisper-1",
+    });
+    return (transcription.text || "").trim();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "OpenAI Whisper failed";
+    throw new Error(friendlyProviderError(msg));
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -139,7 +154,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Add GOOGLE_GENERATIVE_AI_API_KEY to apps/web/.env.local (tray voice needs it for transcription).",
+            "Tray mic needs GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (free at https://aistudio.google.com/apikey). Typing still works without it.",
         },
         { status: 500 },
       );
@@ -149,12 +164,15 @@ export async function POST(req: NextRequest) {
       {
         error:
           errors[0] ||
-          "Tray transcription failed. Chrome voice still works; you can also type.",
+          "Tray transcription failed. Typing still works.",
       },
       { status: 500 },
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "Transcription failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: friendlyProviderError(message) },
+      { status: 500 },
+    );
   }
 }

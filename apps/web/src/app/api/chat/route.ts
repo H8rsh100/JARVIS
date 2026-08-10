@@ -21,10 +21,13 @@ function getModel(): { model: LanguageModel; provider: string } | null {
   }
 
   const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
+  // Reject Cursor-style sk-AQ.* placeholders — they are not OpenAI platform keys
   if (
     openaiKey &&
-    openaiKey.startsWith("sk-") &&
+    !/^sk-AQ\./i.test(openaiKey) &&
+    /^sk-(proj-)?[A-Za-z0-9_-]+$/.test(openaiKey) &&
     !openaiKey.includes("...") &&
+    !openaiKey.includes("your_") &&
     openaiKey.length > 20
   ) {
     const openai = createOpenAI({ apiKey: openaiKey });
