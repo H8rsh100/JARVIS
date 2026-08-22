@@ -35,3 +35,7 @@ RESTART_JARVIS.cmd
 START_JARVIS.cmd
 jarvis.cmd
 
+
+*.ORIGINAL.*
+*.jarvis-*.log
+contracts/

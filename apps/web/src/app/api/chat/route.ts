@@ -28,7 +28,7 @@ function getModel(): { model: LanguageModel; provider: string } | null {
 function demoReply(message: string): string | null {
   const m = message.toLowerCase();
   if (/hello|hi\b|hey|who are you|jarvis/.test(m)) {
-    return "JARVIS online. Local laptop assistant ready. Wake is Hello Jarvis. I open allowlisted apps and folders on this PC. I do not have full system control.";
+    return "JARVIS online. Local laptop assistant ready. Wake is Hey Jarvis, then tap the mic for commands. I open allowlisted apps and folders on this PC. I do not have full system control.";
   }
   if (
     /what can you|help|capabilit|limits|permissions|full (pc|computer|laptop)|can you control|can you access/.test(

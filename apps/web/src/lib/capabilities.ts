@@ -15,7 +15,7 @@ I can:
 - Window control: focus, minimize, close (close asks confirm)
 - Clipboard: read clipboard, "copy that" for my last reply
 - Memory: your name, project path, favorites
-- Stay hot ~45s after wake for continuous commands
+- Wake hands-free with "Hey Jarvis" (guard mode); every command needs a tap on the mic
 - Camera in this UI; IST date/time; power sleep/restart/shutdown with confirm
 - JARVIS runs in its own Chrome app window; "Open Chrome" opens your normal browser
 

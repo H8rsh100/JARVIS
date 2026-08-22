@@ -19,8 +19,46 @@ import {
 import { formatISTReply, isDateTimeQuestion } from "@/lib/datetime";
 import { handleMemoryCommand, loadMemory } from "@/lib/memory";
 
-const WAKE = /^\s*hello\s*,?\s*jarvis\s*[.!?]?\s*$/i;
+const WAKE = /^\s*(hey|hi|hello)\s*,?\s*jarvis\s*[.!?]?\s*$/i;
 const HOT_MS = 45_000;
+
+type RecEvent = {
+  error?: string;
+  results?: ArrayLike<ArrayLike<{ transcript: string }>>;
+};
+type Rec = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  continuous: boolean;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: RecEvent) => void) | null;
+  onerror: ((event: RecEvent) => void) | null;
+  onend: (() => void) | null;
+};
+type SRCtor = new () => Rec;
+
+let jarvisVoice: SpeechSynthesisVoice | null = null;
+function pickJarvisVoice(): SpeechSynthesisVoice | null {
+  if (jarvisVoice) return jarvisVoice;
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return null;
+  }
+  const voices = window.speechSynthesis.getVoices();
+  jarvisVoice =
+    voices.find((v) => /^ryan$/i.test(v.name) && /en[-_]GB/i.test(v.lang)) ||
+    voices.find(
+      (v) =>
+        /en[-_]GB/i.test(v.lang) &&
+        /daniel|arthur|oliver|george|male/i.test(v.name),
+    ) ||
+    voices.find((v) => /google uk english male/i.test(v.name)) ||
+    voices.find((v) => /en[-_]GB/i.test(v.lang)) ||
+    null;
+  return jarvisVoice;
+}
 
 function isWake(text: string) {
   return WAKE.test(text.trim());
@@ -58,6 +96,12 @@ export function Assistant() {
   const replyRef = useRef("");
   const listenSoonTimer = useRef<number | null>(null);
   const startListeningRef = useRef<() => void>(() => {});
+  const guardRef = useRef<Rec | null>(null);
+  const guardWantedRef = useRef(false);
+  const wakeAtRef = useRef(0);
+  const guardStartRef = useRef<() => void>(() => {});
+  const guardStopRef = useRef<() => void>(() => {});
+  const [guardOn, setGuardOn] = useState(false);
 
   useEffect(() => {
     awakeRef.current = awake;
@@ -98,7 +142,10 @@ export function Assistant() {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text.slice(0, 400));
-        utter.rate = 1.12;
+        const voice = pickJarvisVoice();
+        if (voice) utter.voice = voice;
+        utter.rate = 0.98;
+        utter.pitch = 0.9;
         window.speechSynthesis.speak(utter);
       }
     } catch {
@@ -106,23 +153,7 @@ export function Assistant() {
     }
   }, []);
 
-  const scheduleHotListen = useCallback(() => {
-    if (listenSoonTimer.current) {
-      window.clearTimeout(listenSoonTimer.current);
-      listenSoonTimer.current = null;
-    }
-    listenSoonTimer.current = window.setTimeout(() => {
-      if (
-        awakeRef.current &&
-        Date.now() < hotUntilRef.current &&
-        !busyRef.current &&
-        !recognitionRef.current &&
-        !mediaRecorderRef.current
-      ) {
-        startListeningRef.current();
-      }
-    }, 900);
-  }, []);
+  const scheduleHotListen = useCallback(() => {}, []);
 
   const openCamera = useCallback(async () => {
     try {
@@ -165,6 +196,11 @@ export function Assistant() {
       }
       try {
         mediaRecorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        guardRef.current?.stop();
       } catch {
         /* ignore */
       }
@@ -256,6 +292,8 @@ export function Assistant() {
         setTranscript(text);
         setAwake(true);
         awakeRef.current = true;
+        guardWantedRef.current = false;
+        guardStopRef.current();
         const mem = loadMemory();
         const line = mem.name
           ? `Hello ${mem.name}, ready to assist`
@@ -314,6 +352,8 @@ export function Assistant() {
         pushActivity({ userText: text, assistantText: line, status: "info" });
         speak(line);
         setBusy(false);
+        guardWantedRef.current = true;
+        void guardStartRef.current();
         return;
       }
 
@@ -688,6 +728,102 @@ export function Assistant() {
     else void startListening();
   }, [busy, listening, startListening, stopListening]);
 
+  const stopGuard = useCallback(() => {
+    guardWantedRef.current = false;
+    try {
+      guardRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    guardRef.current = null;
+    setGuardOn(false);
+  }, []);
+
+  const startGuard = useCallback(async () => {
+    if (!guardWantedRef.current) return;
+    if (awakeRef.current || busyRef.current) return;
+    if (recognitionRef.current || mediaRecorderRef.current) return;
+    if (guardRef.current) return;
+
+    const w = window as unknown as {
+      SpeechRecognition?: SRCtor;
+      webkitSpeechRecognition?: SRCtor;
+    };
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) {
+      setError("Voice guard needs Chrome or Edge. Tap mic to talk instead.");
+      guardWantedRef.current = false;
+      return;
+    }
+
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.continuous = true;
+    guardRef.current = rec;
+
+    rec.onresult = (event) => {
+      const said = event.results?.[0]?.[0]?.transcript?.trim();
+      if (said && isWake(said)) {
+        wakeAtRef.current = Date.now();
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
+        void runChat(said);
+      }
+    };
+
+    rec.onerror = (event) => {
+      const code = event.error || "";
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setError(
+          "Guard needs mic permission. Allow mic in the address bar, then tap Guard.",
+        );
+        guardWantedRef.current = false;
+        guardRef.current = null;
+        setGuardOn(false);
+      } else if (code === "audio-capture") {
+        setError("No microphone found for guard mode.");
+        guardWantedRef.current = false;
+        guardRef.current = null;
+        setGuardOn(false);
+      }
+    };
+
+    rec.onend = () => {
+      guardRef.current = null;
+      const justWoke = Date.now() - wakeAtRef.current < 2500;
+      if (guardWantedRef.current && !justWoke && !awakeRef.current) {
+        window.setTimeout(() => guardStartRef.current(), 700);
+      } else if (!justWoke && !awakeRef.current) {
+        setGuardOn(false);
+      }
+    };
+
+    try {
+      rec.start();
+      setGuardOn(true);
+    } catch {
+      guardRef.current = null;
+      window.setTimeout(() => guardStartRef.current(), 1200);
+    }
+  }, [runChat]);
+
+  useEffect(() => {
+    guardStartRef.current = () => {
+      void startGuard();
+    };
+    guardStopRef.current = stopGuard;
+  }, [startGuard, stopGuard]);
+
+  useEffect(() => {
+    guardWantedRef.current = true;
+    void startGuard();
+  }, [startGuard]);
+
   const hotLeft = Math.max(0, hotUntil - Date.now());
 
   return (
@@ -747,8 +883,27 @@ export function Assistant() {
               ? hotLeft > 0
                 ? `Online · hot ${Math.ceil(hotLeft / 1000)}s`
                 : "Online"
-              : "Standby"}
+              : guardOn
+                ? "Guard armed · say Hey Jarvis"
+                : "Standby"}
       </p>
+
+      {!awake && (
+        <button
+          type="button"
+          onClick={() => {
+            if (guardOn) {
+              guardStopRef.current();
+            } else {
+              guardWantedRef.current = true;
+              void guardStartRef.current();
+            }
+          }}
+          className="rounded-full border border-signal/30 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-signal/80 hover:border-signal/60"
+        >
+          guard · {guardOn ? "armed" : "off"}
+        </button>
+      )}
 
       {cameraOn && (
         <div className="relative w-full overflow-hidden rounded-2xl border border-signal/25 shadow-glow">
@@ -782,7 +937,7 @@ export function Assistant() {
         <input
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
-          placeholder={awake ? "Ask JARVIS..." : "Hello Jarvis"}
+          placeholder={awake ? "Ask JARVIS..." : "Say or type: Hey Jarvis"}
           className="flex-1 rounded-xl border border-white/10 bg-panel/80 px-4 py-3 text-sm text-white outline-none ring-signal/40 placeholder:text-mist/50 focus:ring-2"
         />
         <button
