@@ -41,22 +41,40 @@ type Rec = {
 type SRCtor = new () => Rec;
 
 let jarvisVoice: SpeechSynthesisVoice | null = null;
+const FEMALE_HINTS =
+  /female|sonia|libby|hazel|susan|kate|serena|zira|eva|heera|priya|samantha|victoria|fiona|moira|tessa|veena/i;
+const MALE_HINTS =
+  /\bmale\b|george|ryan|daniel|arthur|oliver|james|guy|eric|brian|adam/i;
+
+function scoreVoice(v: SpeechSynthesisVoice): number {
+  const gb = /en[-_]GB/i.test(v.lang);
+  let s = 0;
+  if (gb) s += 40;
+  if (FEMALE_HINTS.test(v.name)) s -= 100;
+  else if (MALE_HINTS.test(v.name)) s += 50;
+  if (/natural|online/i.test(v.name)) s += 10;
+  else if (!gb && /^en/i.test(v.lang)) s += 5;
+  return s;
+}
+
 function pickJarvisVoice(): SpeechSynthesisVoice | null {
   if (jarvisVoice) return jarvisVoice;
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     return null;
   }
   const voices = window.speechSynthesis.getVoices();
-  jarvisVoice =
-    voices.find((v) => /^ryan$/i.test(v.name) && /en[-_]GB/i.test(v.lang)) ||
-    voices.find(
-      (v) =>
-        /en[-_]GB/i.test(v.lang) &&
-        /daniel|arthur|oliver|george|male/i.test(v.name),
-    ) ||
-    voices.find((v) => /google uk english male/i.test(v.name)) ||
-    voices.find((v) => /en[-_]GB/i.test(v.lang)) ||
-    null;
+  if (!voices.length) return null;
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -Infinity;
+  for (const v of voices) {
+    if (!/^en/i.test(v.lang)) continue;
+    const s = scoreVoice(v);
+    if (s > bestScore) {
+      bestScore = s;
+      best = v;
+    }
+  }
+  jarvisVoice = best;
   return jarvisVoice;
 }
 
@@ -104,6 +122,7 @@ export function Assistant() {
   const [guardState, setGuardState] = useState<"off" | "armed" | "blocked">(
     "off",
   );
+  const [guardHeard, setGuardHeard] = useState("");
 
   useEffect(() => {
     awakeRef.current = awake;
@@ -146,8 +165,8 @@ export function Assistant() {
         const utter = new SpeechSynthesisUtterance(text.slice(0, 400));
         const voice = pickJarvisVoice();
         if (voice) utter.voice = voice;
-        utter.rate = 0.98;
-        utter.pitch = 0.9;
+        utter.rate = 0.95;
+        utter.pitch = 0.82;
         window.speechSynthesis.speak(utter);
       }
     } catch {
@@ -768,6 +787,7 @@ export function Assistant() {
     rec.onresult = (event) => {
       const len = event.results?.length ?? 0;
       const said = event.results?.[len - 1]?.[0]?.transcript?.trim();
+      setGuardHeard(said || "");
       if (said && isWake(said)) {
         wakeAtRef.current = Date.now();
         try {
@@ -811,7 +831,11 @@ export function Assistant() {
       setGuardState("armed");
     } catch {
       guardRef.current = null;
-      window.setTimeout(() => guardStartRef.current(), 1200);
+      guardWantedRef.current = false;
+      setGuardState("blocked");
+      setError(
+        "Guard could not start (browser blocked it). Tap Guard once more.",
+      );
     }
   }, [runChat]);
 
@@ -843,6 +867,18 @@ export function Assistant() {
     guardWantedRef.current = true;
     void startGuard();
   }, [startGuard]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const warm = () => {
+      jarvisVoice = null;
+      pickJarvisVoice();
+    };
+    warm();
+    synth.addEventListener?.("voiceschanged", warm);
+    return () => synth.removeEventListener?.("voiceschanged", warm);
+  }, []);
 
   const hotLeft = Math.max(0, hotUntil - Date.now());
 
@@ -922,6 +958,12 @@ export function Assistant() {
         >
           guard · {guardState}
         </button>
+      )}
+
+      {!awake && guardState === "armed" && guardHeard && (
+        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-mist/40">
+          guard heard · {guardHeard}
+        </p>
       )}
 
       {cameraOn && (
