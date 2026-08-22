@@ -101,7 +101,9 @@ export function Assistant() {
   const wakeAtRef = useRef(0);
   const guardStartRef = useRef<() => void>(() => {});
   const guardStopRef = useRef<() => void>(() => {});
-  const [guardOn, setGuardOn] = useState(false);
+  const [guardState, setGuardState] = useState<"off" | "armed" | "blocked">(
+    "off",
+  );
 
   useEffect(() => {
     awakeRef.current = awake;
@@ -736,7 +738,7 @@ export function Assistant() {
       /* ignore */
     }
     guardRef.current = null;
-    setGuardOn(false);
+    setGuardState("off");
   }, []);
 
   const startGuard = useCallback(async () => {
@@ -764,7 +766,8 @@ export function Assistant() {
     guardRef.current = rec;
 
     rec.onresult = (event) => {
-      const said = event.results?.[0]?.[0]?.transcript?.trim();
+      const len = event.results?.length ?? 0;
+      const said = event.results?.[len - 1]?.[0]?.transcript?.trim();
       if (said && isWake(said)) {
         wakeAtRef.current = Date.now();
         try {
@@ -780,16 +783,16 @@ export function Assistant() {
       const code = event.error || "";
       if (code === "not-allowed" || code === "service-not-allowed") {
         setError(
-          "Guard needs mic permission. Allow mic in the address bar, then tap Guard.",
+          "Guard blocked: click the mic-permission icon in Chrome's address bar, allow, then tap Guard.",
         );
         guardWantedRef.current = false;
         guardRef.current = null;
-        setGuardOn(false);
+        setGuardState("blocked");
       } else if (code === "audio-capture") {
         setError("No microphone found for guard mode.");
         guardWantedRef.current = false;
         guardRef.current = null;
-        setGuardOn(false);
+        setGuardState("off");
       }
     };
 
@@ -799,18 +802,35 @@ export function Assistant() {
       if (guardWantedRef.current && !justWoke && !awakeRef.current) {
         window.setTimeout(() => guardStartRef.current(), 700);
       } else if (!justWoke && !awakeRef.current) {
-        setGuardOn(false);
+        setGuardState("off");
       }
     };
 
     try {
       rec.start();
-      setGuardOn(true);
+      setGuardState("armed");
     } catch {
       guardRef.current = null;
       window.setTimeout(() => guardStartRef.current(), 1200);
     }
   }, [runChat]);
+
+  const toggleGuard = useCallback(async () => {
+    if (guardState === "armed") {
+      guardStopRef.current();
+      return;
+    }
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+    } catch {
+      setError("Mic permission denied. Allow mic in Chrome, then tap Guard.");
+      setGuardState("blocked");
+      return;
+    }
+    guardWantedRef.current = true;
+    void guardStartRef.current();
+  }, [guardState]);
 
   useEffect(() => {
     guardStartRef.current = () => {
@@ -883,7 +903,7 @@ export function Assistant() {
               ? hotLeft > 0
                 ? `Online · hot ${Math.ceil(hotLeft / 1000)}s`
                 : "Online"
-              : guardOn
+              : guardState === "armed"
                 ? "Guard armed · say Hey Jarvis"
                 : "Standby"}
       </p>
@@ -891,17 +911,16 @@ export function Assistant() {
       {!awake && (
         <button
           type="button"
-          onClick={() => {
-            if (guardOn) {
-              guardStopRef.current();
-            } else {
-              guardWantedRef.current = true;
-              void guardStartRef.current();
-            }
-          }}
-          className="rounded-full border border-signal/30 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-signal/80 hover:border-signal/60"
+          onClick={() => void toggleGuard()}
+          className={
+            guardState === "armed"
+              ? "rounded-full border border-signal/70 bg-signal/10 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-signal"
+              : guardState === "blocked"
+                ? "rounded-full border border-amber-500/50 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-amber-300"
+                : "rounded-full border border-signal/30 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-signal/80 hover:border-signal/60"
+          }
         >
-          guard · {guardOn ? "armed" : "off"}
+          guard · {guardState}
         </button>
       )}
 
