@@ -14,6 +14,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- AUTO-INSTALL: only when dependencies are missing ---
+if not exist "node_modules\.pnpm" (
+  echo First run - installing dependencies...
+  call pnpm install
+  if errorlevel 1 (
+    echo Dependency install failed. Fix errors above and retry.
+    pause
+    exit /b 1
+  )
+)
+
 REM --- FAST PATH: already warm? open window only ---
 powershell -NoProfile -Command "try{$w=Invoke-WebRequest -Uri http://127.0.0.1:3000/ -UseBasicParsing -TimeoutSec 1; $a=Invoke-WebRequest -Uri http://127.0.0.1:3847/health -UseBasicParsing -TimeoutSec 1; if($w.StatusCode -eq 200 -and $a.StatusCode -eq 200){exit 0}else{exit 1}}catch{exit 1}"
 if not errorlevel 1 (
