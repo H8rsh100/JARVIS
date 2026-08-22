@@ -1,40 +1,38 @@
 /**
  * What JARVIS can and cannot do on the laptop.
- * Used by the UI fast-path and the LLM system prompt.
  */
 
 export const CAPABILITIES_BRIEF =
-  "I can open allowlisted apps, folders, and URLs on this PC through the local desktop agent, plus camera in the UI and optional wallet tools. I do not have full PC control.";
+  "I can open scanned apps, folders, and URLs on this PC, manage windows and clipboard, plus camera in the UI. I do not have full PC control.";
 
 export const CAPABILITIES_FULL = `Here is my scope on this laptop.
 
 I can:
-- Open allowlisted apps: Chrome, Edge, VS Code, Cursor, Notepad, Explorer, Terminal, PowerShell, Calculator, Spotify, Discord
-- Open folders: Desktop, Downloads, Documents, Home, and the JARVIS project
-- Open sites and URLs: YouTube, Google, GitHub, Gmail, localhost, or any http link
-- Open or close the camera in this UI
-- Put the PC to sleep, hibernate, restart, or shut down (asks you to confirm first)
-- Tell the current date and time in Indian Standard Time (IST)
-- I run in my own desktop window. Opening Chrome opens a separate browser for you.
-- Chat after you wake me with Hello Jarvis
-- Optionally help with wallet and testnet Web3 tools if connected
+- Scan installed Start Menu apps and open them by name (aliases + fuzzy match)
+- Open apps: Chrome, Edge, Cursor, VS Code, WhatsApp, Slack, Notion, Figma, Outlook, Spotify, Discord, Teams, and more
+- Open folders: Desktop, Downloads, Documents, Home, JARVIS project, today's Downloads, resume/CV search
+- Open sites and URLs
+- Window control: focus, minimize, close (close asks confirm)
+- Clipboard: read clipboard, "copy that" for my last reply
+- Memory: your name, project path, favorites
+- Stay hot ~45s after wake for continuous commands
+- Camera in this UI; IST date/time; power sleep/restart/shutdown with confirm
+- JARVIS runs in its own Chrome app window; "Open Chrome" opens your normal browser
 
 I cannot:
 - Full PC control
-- Arbitrary file reads or writes
+- Arbitrary file writes
 - Mouse or keyboard takeover
 - Silent system settings changes
-- Run random shell commands from chat without an explicit confirm path; the agent deny-lists dangerous patterns
+- Unchecked shell
 
-Safety: the desktop agent only listens on 127.0.0.1 and only runs allowlisted actions.`;
+Safety: agent only on 127.0.0.1; risky actions need confirm.`;
 
 export const CAPABILITIES_SPOKEN =
-  "I can open allowlisted apps, folders, and URLs on this PC. I do not have full control: no arbitrary files, no mouse takeover, no silent system changes, and no unchecked shell.";
+  "I can scan and open apps on this PC, manage folders, windows, and clipboard, and stay listening after wake. I do not have full system control.";
 
-/** True when the user is asking what JARVIS can / cannot do. */
 export function isCapabilitiesQuestion(text: string): boolean {
   const t = text.trim();
-  // bare "help" only — not "help me open chrome"
   if (/^\s*help\s*[!?.]?\s*$/i.test(t)) return true;
   return (
     /\bwhat can you (do|access|control)\b/i.test(t) ||

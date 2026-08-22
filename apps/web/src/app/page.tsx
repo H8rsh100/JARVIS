@@ -1,20 +1,10 @@
 "use client";
 
-import { useAccount, useBalance, useChainId } from "wagmi";
 import { Assistant } from "@/components/Assistant";
-import { WalletButton } from "@/components/WalletButton";
 import { StarkHudRails } from "@/components/StarkHudRails";
 import { motion } from "framer-motion";
 
 export default function HomePage() {
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { data: balance } = useBalance({
-    address,
-    query: { enabled: Boolean(address) },
-  });
-  const spendCap = process.env.NEXT_PUBLIC_SESSION_SPEND_CAP || "0.05";
-
   return (
     <main className="jarvis-atmosphere relative min-h-screen overflow-hidden">
       <div className="jarvis-blueprint absolute inset-0" />
@@ -35,18 +25,9 @@ export default function HomePage() {
             J.A.R.V.I.S.
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          {isConnected && balance && (
-            <span className="hidden font-mono text-xs text-mist md:inline">
-              {Number(balance.formatted).toFixed(4)} {balance.symbol}
-            </span>
-          )}
-          <WalletButton />
-        </div>
       </header>
 
       <section className="relative z-10 mx-auto flex min-h-[calc(100vh-5.5rem)] w-full max-w-3xl flex-col items-center justify-center px-5 pb-14 pt-4 text-center">
-        {/* Title sits ABOVE the reactor, not overlapping a random ring */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -67,12 +48,7 @@ export default function HomePage() {
           transition={{ delay: 0.2, duration: 0.6 }}
           className="mt-8 w-full max-w-xl"
         >
-          <Assistant
-            walletAddress={address}
-            chainId={chainId}
-            isConnected={isConnected}
-            spendCap={spendCap}
-          />
+          <Assistant />
         </motion.div>
       </section>
     </main>

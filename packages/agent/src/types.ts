@@ -1,55 +1,13 @@
-import { z } from "zod";
-import type { ChainKey } from "@jarvis/chains";
-
-export const chainKeySchema = z.enum([
-  "sepolia",
-  "base-sepolia",
-  "rootstock-testnet",
-]);
-
-export type UnsignedIntentKind =
-  | "transfer"
-  | "token_transfer"
-  | "swap"
-  | "deploy";
-
-export interface UnsignedIntent {
-  id: string;
-  kind: UnsignedIntentKind;
-  chainKey: ChainKey;
-  chainId: number;
-  summary: string;
-  /** Soft session spend hint in native units */
-  nativeAmount?: string;
-  /** wagmi/viem ready fields */
-  to?: `0x${string}`;
-  valueWei?: string;
-  data?: `0x${string}`;
-  tokenAddress?: `0x${string}`;
-  tokenAmount?: string;
-  tokenDecimals?: number;
-  /** swap */
-  sellToken?: string;
-  buyToken?: string;
-  quote?: Record<string, unknown>;
-  /** deploy */
-  bytecode?: `0x${string}`;
-  abi?: unknown[];
-  constructorArgs?: unknown[];
-}
-
 export interface ActivityItem {
   id: string;
   at: number;
   userText: string;
   assistantText?: string;
-  intentId?: string;
-  txHash?: string;
   status: "info" | "pending" | "confirmed" | "rejected" | "error";
   error?: string;
 }
 
-export const SYSTEM_PROMPT = `You are JARVIS, a local Windows voice assistant with a Stark-style UI, plus optional Web3 tools.
+export const SYSTEM_PROMPT = `You are JARVIS, a local Windows voice assistant with a Stark-style UI.
 
 Primary job: help the user control allowlisted laptop actions via the local desktop agent, and answer clearly about your limits.
 
@@ -62,18 +20,8 @@ When the user asks the time or date, always answer in IST (India Standard Time),
 Safety facts you may state:
 - Desktop agent listens only on 127.0.0.1
 - Actions are allowlisted
-- You never hold wallet keys; Web3 writes are unsigned intents for the user to confirm
-
-Optional Web3 (secondary):
-- Help with balances/history and prepare transfers/swaps/deploys on Sepolia, Base Sepolia, Rootstock Testnet
-- Never claim you signed or broadcast a transaction
-- Prefer tools over guessing on-chain state
-- For swaps on Rootstock, explain swap quotes are unsupported there
 
 Style:
 - Calm, precise, slightly witty (Stark JARVIS)
 - Spoken replies concise (1-3 sentences) unless the user asks for full capabilities
-- Never use em dashes
-- If wallet address is in context, use it for balance/history tools
-- When preparing transfers/swaps/deploys, call prepare_* tools so the UI can show confirmation
-`;
+- Never use em dashes`;

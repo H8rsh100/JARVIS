@@ -2,34 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateText, type LanguageModel } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { createJarvisTools, SYSTEM_PROMPT, type UnsignedIntent } from "@jarvis/agent";
-import { isAddress, type Address } from "viem";
+import { SYSTEM_PROMPT } from "@jarvis/agent";
 import { formatISTReply } from "@/lib/datetime";
+import { googleAiStudioKey, openaiPlatformKey } from "@/lib/apiKeys";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 function getModel(): { model: LanguageModel; provider: string } | null {
-  const googleKey = (
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    ""
-  ).trim();
-  if (googleKey && !googleKey.includes("your_")) {
+  const googleKey = googleAiStudioKey();
+  if (googleKey) {
     const google = createGoogleGenerativeAI({ apiKey: googleKey });
     return { model: google("gemini-2.0-flash-lite"), provider: "google" };
   }
 
-  const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
-  // Reject Cursor-style sk-AQ.* placeholders — they are not OpenAI platform keys
-  if (
-    openaiKey &&
-    !/^sk-AQ\./i.test(openaiKey) &&
-    /^sk-(proj-)?[A-Za-z0-9_-]+$/.test(openaiKey) &&
-    !openaiKey.includes("...") &&
-    !openaiKey.includes("your_") &&
-    openaiKey.length > 20
-  ) {
+  const openaiKey = openaiPlatformKey();
+  if (openaiKey) {
     const openai = createOpenAI({ apiKey: openaiKey });
     return { model: openai("gpt-4o-mini"), provider: "openai" };
   }
@@ -37,7 +25,7 @@ function getModel(): { model: LanguageModel; provider: string } | null {
 }
 
 /** Instant demo replies when the model is slow/unavailable */
-function demoReply(message: string, chainId?: number): string | null {
+function demoReply(message: string): string | null {
   const m = message.toLowerCase();
   if (/hello|hi\b|hey|who are you|jarvis/.test(m)) {
     return "JARVIS online. Local laptop assistant ready. Wake is Hello Jarvis. I open allowlisted apps and folders on this PC. I do not have full system control.";
@@ -47,15 +35,10 @@ function demoReply(message: string, chainId?: number): string | null {
       m,
     )
   ) {
-    return "I can open allowlisted apps, folders, and URLs via the local desktop agent, plus camera in this UI. I cannot do full PC control, arbitrary file reads or writes, mouse or keyboard takeover, silent system settings, or unchecked shell. Optional Web3 tools stay confirm-gated in your wallet.";
+    return "I can open allowlisted apps, folders, and URLs via the local desktop agent, plus camera in this UI. I cannot do full PC control, arbitrary file reads or writes, mouse or keyboard takeover, silent system settings, or unchecked shell.";
   }
-  if (/do on rootstock|do on base/.test(m)) {
-    return "On Base and Sepolia I can help with balances, transfers, and swap quotes. Rootstock supports reads and transfers; swaps are Sepolia and Base only. Every write waits for your wallet confirm.";
-  }
-  if (/balance/.test(m)) {
-    return chainId
-      ? `I will query your connected wallet on chain ${chainId}. Connect MetaMask if you have not, then ask again and I will fetch live balance.`
-      : "Connect MetaMask, then ask again. I will fetch your live testnet balance.";
+  if (/balance|wallet|crypto|swap|token/.test(m)) {
+    return "Wallet and chain features were retired in this build. I am focused on laptop control now.";
   }
   return null;
 }
@@ -64,8 +47,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
       message?: string;
-      walletAddress?: string;
-      chainId?: number;
     };
 
     const message = body.message?.trim();
@@ -73,24 +54,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "message required" }, { status: 400 });
     }
 
-    const walletAddress =
-      body.walletAddress && isAddress(body.walletAddress)
-        ? (body.walletAddress as Address)
-        : undefined;
-
     const resolved = getModel();
 
-    // Fast path for simple talk (no tool round-trips)
-    const quick = demoReply(message, body.chainId);
-    const needsTools =
-      /send|transfer|swap|deploy|balance|history|token|0x[a-f0-9]{40}/i.test(
-        message,
-      );
-
-    if (quick && !needsTools) {
+    // Fast path for simple talk
+    const quick = demoReply(message);
+    if (quick) {
       return NextResponse.json({
         text: quick,
-        intent: null,
         provider: "demo-fast",
       });
     }
@@ -99,35 +69,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         text:
           quick ||
-          "Systems nominal, but no AI key is loaded. Add GOOGLE_GENERATIVE_AI_API_KEY to apps/web/.env.local and restart. Meanwhile: connect MetaMask and use the suggestion chips.",
-        intent: null,
+          "Systems nominal, but no AI key is loaded. Add GOOGLE_GENERATIVE_AI_API_KEY to apps/web/.env.local and restart.",
         provider: "demo",
       });
     }
 
-    let captured: UnsignedIntent | null = null;
-    const tools = createJarvisTools({
-      walletAddress,
-      onIntent: (intent) => {
-        captured = intent;
-      },
-    });
-
     const result = await generateText({
       model: resolved.model,
       system: `${SYSTEM_PROMPT}
-Wallet: ${walletAddress || "none"} | chainId: ${body.chainId ?? "unknown"}
 Clock (authoritative): ${formatISTReply("both")}
 Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly witty. Never use em dashes. For date/time questions use the Clock line above (IST).`,
       prompt: message,
-      tools: needsTools ? tools : undefined,
-      maxSteps: needsTools ? 2 : 1,
+      maxSteps: 1,
       temperature: 0.35,
     });
 
     return NextResponse.json({
       text: result.text || quick || "Done.",
-      intent: captured,
       provider: resolved.provider,
     });
   } catch (e) {
@@ -135,7 +93,6 @@ Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly
     const fallback = demoReply("help");
     return NextResponse.json({
       text: fallback || `Link unstable: ${message}`,
-      intent: null,
       provider: "fallback",
     });
   }

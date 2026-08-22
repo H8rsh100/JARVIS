@@ -1,27 +1,55 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { NeuralCore } from "@/components/NeuralCore";
+import { useSystemStats } from "@/hooks/useSystemStats";
 
-const LEFT = [
-  "SYS.CORE // ONLINE",
-  "VOICE.LINK // ARMED",
-  "AGENT.HOST // 127.0.0.1",
-  "WAKE.PHRASE // HELLO JARVIS",
-  "CONFIRM.GATE // ENABLED",
-  "CAM.FEED // STANDBY",
-];
-
-const RIGHT = [
-  "PWR ████████░░ 82%",
-  "LAT ████░░░░░░ 41ms",
-  "NET ██████████ LIVE",
-  "CPU ██████░░░░ 63%",
-  "MEM █████░░░░░ 54%",
-  "THR ░░░░░░░░░░ LOW",
-];
+/** Fill █ / ░ bar — 10 blocks total */
+function bar(pct: number): string {
+  const n = Math.min(10, Math.max(0, Math.round(pct / 10)));
+  return "█".repeat(n) + "░".repeat(10 - n);
+}
 
 export function StarkHudRails() {
+  const s = useSystemStats();
+
+  /* Live clock — updates every second client-side */
+  const [clock, setClock] = useState("");
+  useEffect(() => {
+    function tick() {
+      const n = new Date();
+      setClock(
+        `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}:${String(n.getSeconds()).padStart(2, "0")}`,
+      );
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const dash = !s.loaded ? "--" : null;
+
+  /* LEFT panel — same KEY // VALUE format */
+  const LEFT = [
+    "SYS.CORE // ONLINE",
+    "VOICE.LINK // ARMED",
+    "AGENT.HOST // 127.0.0.1",
+    `CLOCK // ${clock || "--:--:--"}`,
+    `UPTIME // ${dash ?? `${s.uptimeH}H ${String(s.uptimeM).padStart(2, "0")}M`}`,
+    `IP.ADDR // ${s.ip}`,
+  ];
+
+  /* RIGHT panel — same KEY BAR VALUE format */
+  const pingBar = s.ping !== null ? bar(Math.min(100, s.ping * 1.5)) : "░░░░░░░░░░";
+  const RIGHT = [
+    `CPU ${bar(s.cpu)} ${dash ?? s.cpu + "%"}`,
+    `RAM ${bar(s.ram)} ${dash ?? s.ram + "%"}`,
+    `BAT ${s.battery !== null ? bar(s.battery) : "░░░░░░░░░░"} ${s.battery !== null ? s.battery + "%" : "N/A"}`,
+    `NET ${s.online ? "██████████" : "░░░░░░░░░░"} ${s.online ? "LIVE" : "DOWN"}`,
+    `MEM ${bar(s.ram)} ${dash ?? s.memUsedGB + "G"}`,
+    `LAT ${pingBar} ${s.ping !== null ? s.ping + "ms" : "--"}`,
+  ];
   return (
     <>
       {/* left telemetry — suit sits in the gap above ARC.MATRIX */}
@@ -75,7 +103,7 @@ export function StarkHudRails() {
           <p className="font-mono text-[9px] tracking-[0.35em] text-signal/80">DIAGNOSTICS</p>
           {RIGHT.map((line, i) => (
             <motion.p
-              key={line}
+              key={i}
               className="font-mono text-[10px] leading-relaxed text-mist/70"
               initial={{ opacity: 0, x: 8 }}
               animate={{ opacity: 1, x: 0 }}

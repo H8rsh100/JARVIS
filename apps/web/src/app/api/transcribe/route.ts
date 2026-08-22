@@ -1,27 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import {
+  googleAiStudioKey,
+  googleKeyRejectReason,
+  openaiPlatformKey,
+} from "@/lib/apiKeys";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-function googleKey(): string {
-  return (
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    ""
-  ).trim();
-}
-
-/** Real OpenAI keys only — reject Cursor/other sk-AQ placeholders that pass a naive sk- check. */
-function openaiKey(): string {
-  const k = (process.env.OPENAI_API_KEY || "").trim();
-  if (!k) return "";
-  if (k.includes("...") || k.includes("your_") || k.length < 20) return "";
-  // Cursor / non-OpenAI keys often look like sk-AQ.… — Whisper will 401
-  if (/^sk-AQ\./i.test(k)) return "";
-  if (!/^sk-(proj-)?[A-Za-z0-9_-]+$/.test(k)) return "";
-  return k;
-}
 
 function normalizeMime(raw: string | undefined): string {
   const base = (raw || "audio/webm").split(";")[0].trim().toLowerCase();
@@ -31,9 +17,8 @@ function normalizeMime(raw: string | undefined): string {
 }
 
 function friendlyProviderError(raw: string): string {
-  // Never surface key material from provider error strings
   if (/incorrect api key|invalid.?api.?key|401/i.test(raw)) {
-    return "STT API key rejected. Add a Google AI Studio key as GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (tray mic uses Gemini).";
+    return "STT API key rejected. Use a Google AI Studio key (AIza…) or open Chrome via START_JARVIS_CHROME.cmd for built-in mic.";
   }
   return raw.replace(/sk-[A-Za-z0-9._-]{8,}/g, "sk-***");
 }
@@ -43,7 +28,6 @@ async function transcribeWithGemini(
   mimeType: string,
   apiKey: string,
 ): Promise<string> {
-  // Direct REST + inline base64 — more reliable than AI SDK file parts for webm in Electron
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: "POST",
@@ -81,7 +65,7 @@ async function transcribeWithGemini(
     const msg = raw.error?.message || `Gemini STT HTTP ${res.status}`;
     if (/api key|permission|unauthenticated/i.test(msg)) {
       throw new Error(
-        "Gemini rejected the STT key. Check GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (AI Studio).",
+        "Gemini rejected the STT key. Get a free AIza… key at https://aistudio.google.com/apikey — or use START_JARVIS_CHROME.cmd for mic.",
       );
     }
     throw new Error(friendlyProviderError(msg));
@@ -107,12 +91,30 @@ async function transcribeWithOpenAI(file: File, apiKey: string): Promise<string>
   }
 }
 
+export async function GET() {
+  const gKey = googleAiStudioKey();
+  const oKey = openaiPlatformKey();
+  const google = Boolean(gKey);
+  const openai = Boolean(oKey);
+  const reject = googleKeyRejectReason();
+  return NextResponse.json({
+    ok: google || openai,
+    google,
+    openai,
+    hint: google
+      ? "STT ready (Gemini)"
+      : openai
+        ? "STT ready (OpenAI Whisper)"
+        : reject ||
+          "Missing STT key. Prefer Chrome mic: double-click START_JARVIS_CHROME.cmd",
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const audio = form.get("audio");
 
-    // Next/Electron may hand back File or Blob
     if (!(audio instanceof Blob)) {
       return NextResponse.json({ error: "audio file required" }, { status: 400 });
     }
@@ -126,12 +128,11 @@ export async function POST(req: NextRequest) {
     }
 
     const mimeType = normalizeMime(audio.type);
-    const gKey = googleKey();
-    const oKey = openaiKey();
-
+    const gKey = googleAiStudioKey();
+    const oKey = openaiPlatformKey();
     const errors: string[] = [];
 
-    if (gKey && !gKey.includes("your_")) {
+    if (gKey) {
       try {
         const text = await transcribeWithGemini(bytes, mimeType, gKey);
         return NextResponse.json({ text, provider: "google" });
@@ -154,18 +155,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Tray mic needs GOOGLE_GENERATIVE_AI_API_KEY in apps/web/.env.local (free at https://aistudio.google.com/apikey). Typing still works without it.",
+            googleKeyRejectReason() ||
+            "Tray mic needs a Google AI Studio key (AIza…). Or use START_JARVIS_CHROME.cmd — Chrome mic works without it.",
         },
         { status: 500 },
       );
     }
 
     return NextResponse.json(
-      {
-        error:
-          errors[0] ||
-          "Tray transcription failed. Typing still works.",
-      },
+      { error: errors[0] || "Tray transcription failed. Typing still works." },
       { status: 500 },
     );
   } catch (e) {

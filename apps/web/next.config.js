@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@jarvis/agent", "@jarvis/chains"],
+  transpilePackages: ["@jarvis/agent"],
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
   webpack: (config) => {

@@ -1,31 +1,5 @@
-"use client";
-
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider } from "wagmi";
-import { useEffect, useState, type ReactNode } from "react";
-import { wagmiConfig } from "@/lib/wagmi";
+import type { ReactNode } from "react";
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return (
-      <div className="jarvis-atmosphere flex min-h-screen items-center justify-center">
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-signal/80">
-          starting jarvis…
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </WagmiProvider>
-  );
+  return <>{children}</>;
 }

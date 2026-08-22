@@ -12,6 +12,8 @@ coverage
 *.log
 .jarvis-chrome-profile
 .jarvis-*.log
+# App scan cache lives in user home; ignore if ever written in-repo
+.jarvis-apps-cache.json
 .DS_Store
 Thumbs.db
 cache
@@ -22,3 +24,14 @@ contracts/out
 !.vscode/extensions.json
 *.tsbuildinfo
 .gitkeep
+
+# Personal launch scripts and helper files
+SET_GEMINI_KEY.cmd
+SET_GEMINI_KEY.ps1
+START_JARVIS_CHROME.cmd
+KEEP_WARM.cmd
+LEARN_FROM_THIS_PROJECT.txt
+RESTART_JARVIS.cmd
+START_JARVIS.cmd
+jarvis.cmd
+

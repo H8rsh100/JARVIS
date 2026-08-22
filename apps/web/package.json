@@ -11,16 +11,13 @@
     "@ai-sdk/google": "^1.2.22",
     "@ai-sdk/openai": "^1.1.13",
     "@jarvis/agent": "workspace:*",
-    "@jarvis/chains": "workspace:*",
-    "@tanstack/react-query": "^5.66.9",
     "ai": "^4.1.46",
     "framer-motion": "^12.4.7",
     "next": "14.2.18",
     "openai": "^4.85.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "viem": "^2.23.2",
-    "wagmi": "^2.14.11",
+    "systeminformation": "^5.33.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

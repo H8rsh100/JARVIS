@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import type { Address } from "viem";
-import type { ActivityItem, UnsignedIntent } from "@jarvis/agent";
-import { ActionPreview } from "@/components/ActionPreview";
+import type { ActivityItem } from "@jarvis/agent";
 import { ArcCore } from "@/components/ArcCore";
+import { ConfirmPanel } from "@/components/ConfirmPanel";
 import {
   agentHealth,
   executeLocalAction,
   parseLocalAction,
+  type LocalAction,
 } from "@/lib/localActions";
 import {
   CAPABILITIES_FULL,
@@ -17,27 +17,16 @@ import {
   isCapabilitiesQuestion,
 } from "@/lib/capabilities";
 import { formatISTReply, isDateTimeQuestion } from "@/lib/datetime";
+import { handleMemoryCommand, loadMemory } from "@/lib/memory";
 
-type Props = {
-  walletAddress?: Address;
-  chainId: number;
-  isConnected: boolean;
-  spendCap: string;
-};
-
-/** Only "Hello Jarvis" (optional comma / trailing punctuation) wakes from standby. */
 const WAKE = /^\s*hello\s*,?\s*jarvis\s*[.!?]?\s*$/i;
+const HOT_MS = 45_000;
 
 function isWake(text: string) {
   return WAKE.test(text.trim());
 }
 
-export function Assistant({
-  walletAddress,
-  chainId,
-  isConnected,
-  spendCap,
-}: Props) {
+export function Assistant() {
   const [awake, setAwake] = useState(false);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -45,17 +34,49 @@ export function Assistant({
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [textInput, setTextInput] = useState("");
-  const [intent, setIntent] = useState<UnsignedIntent | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [cameraOn, setCameraOn] = useState(false);
   const [status, setStatus] = useState("");
+  const [hotUntil, setHotUntil] = useState(0);
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    action: LocalAction;
+    userText: string;
+  } | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<{ stop: () => void; abort?: () => void } | null>(null);
+  const recognitionRef = useRef<{ stop: () => void; abort?: () => void } | null>(
+    null,
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordModeRef = useRef(false);
+  const awakeRef = useRef(false);
+  const hotUntilRef = useRef(0);
+  const busyRef = useRef(false);
+  const replyRef = useRef("");
+  const listenSoonTimer = useRef<number | null>(null);
+  const startListeningRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    awakeRef.current = awake;
+  }, [awake]);
+  useEffect(() => {
+    hotUntilRef.current = hotUntil;
+  }, [hotUntil]);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  useEffect(() => {
+    replyRef.current = reply;
+  }, [reply]);
+
+  const bumpHot = useCallback(() => {
+    const until = Date.now() + HOT_MS;
+    hotUntilRef.current = until;
+    setHotUntil(until);
+  }, []);
 
   const pushActivity = useCallback(
     (item: Omit<ActivityItem, "id" | "at"> & { id?: string }) => {
@@ -64,8 +85,6 @@ export function Assistant({
         at: Date.now(),
         userText: item.userText,
         assistantText: item.assistantText,
-        intentId: item.intentId,
-        txHash: item.txHash,
         status: item.status,
         error: item.error,
       };
@@ -85,6 +104,24 @@ export function Assistant({
     } catch {
       /* optional */
     }
+  }, []);
+
+  const scheduleHotListen = useCallback(() => {
+    if (listenSoonTimer.current) {
+      window.clearTimeout(listenSoonTimer.current);
+      listenSoonTimer.current = null;
+    }
+    listenSoonTimer.current = window.setTimeout(() => {
+      if (
+        awakeRef.current &&
+        Date.now() < hotUntilRef.current &&
+        !busyRef.current &&
+        !recognitionRef.current &&
+        !mediaRecorderRef.current
+      ) {
+        startListeningRef.current();
+      }
+    }, 900);
   }, []);
 
   const openCamera = useCallback(async () => {
@@ -120,6 +157,7 @@ export function Assistant({
     return () => {
       camStreamRef.current?.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      if (listenSoonTimer.current) window.clearTimeout(listenSoonTimer.current);
       try {
         recognitionRef.current?.stop();
       } catch {
@@ -133,12 +171,83 @@ export function Assistant({
     };
   }, []);
 
+  const runLocal = useCallback(
+    async (local: LocalAction, userText: string, confirmed = false) => {
+      setStatus("working");
+      const online = await agentHealth();
+      if (!online) {
+        const line =
+          "Desktop agent is offline. Run jarvis.cmd (keep agent warm).";
+        setReply(line);
+        setError(line);
+        pushActivity({ userText, assistantText: line, status: "error" });
+        speak(line);
+        setBusy(false);
+        setStatus("");
+        return;
+      }
+
+      if (local.risky && !confirmed) {
+        setPendingConfirm({ action: local, userText });
+        setBusy(false);
+        setStatus("");
+        setReply(`Confirm: ${local.summary}?`);
+        return;
+      }
+
+      try {
+        let action = local;
+        if (local.kind === "clipboard_set" && local.target === "last_reply") {
+          const last = replyRef.current?.trim();
+          if (!last) {
+            const line = "Nothing to copy yet.";
+            setReply(line);
+            speak(line);
+            setBusy(false);
+            setStatus("");
+            bumpHot();
+            scheduleHotListen();
+            return;
+          }
+          action = { ...local, text: last };
+        }
+
+        const result = await executeLocalAction(action, {
+          confirm: local.risky === true,
+        });
+        if (!result.ok) throw new Error(result.error || "Action failed");
+
+        let line = result.did || local.summary;
+        if (local.kind === "clipboard_get") {
+          const clip = (result.text || "").trim();
+          line = clip
+            ? `Clipboard: ${clip.slice(0, 280)}`
+            : "Clipboard is empty.";
+        }
+        setReply(line);
+        pushActivity({ userText, assistantText: line, status: "info" });
+        speak(line);
+        bumpHot();
+        scheduleHotListen();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Local action failed";
+        setError(msg);
+        setReply(msg);
+        pushActivity({ userText, status: "error", error: msg });
+        speak(msg);
+      } finally {
+        setBusy(false);
+        setStatus("");
+      }
+    },
+    [bumpHot, pushActivity, scheduleHotListen, speak],
+  );
+
   const runChat = useCallback(
     async (userText: string) => {
       const text = userText.trim();
       if (!text) return;
 
-      // Standby: ignore everything until exact wake phrase
       if (!awake) {
         if (!isWake(text)) return;
         setBusy(true);
@@ -146,11 +255,17 @@ export function Assistant({
         setStatus("");
         setTranscript(text);
         setAwake(true);
-        const line = "Hello sir, ready to assist";
+        awakeRef.current = true;
+        const mem = loadMemory();
+        const line = mem.name
+          ? `Hello ${mem.name}, ready to assist`
+          : "Hello sir, ready to assist";
         setReply(line);
         pushActivity({ userText: text, assistantText: line, status: "info" });
         speak(line);
         setBusy(false);
+        bumpHot();
+        scheduleHotListen();
         return;
       }
 
@@ -173,6 +288,8 @@ export function Assistant({
         });
         speak(line);
         setBusy(false);
+        bumpHot();
+        scheduleHotListen();
         return;
       }
       if (/close (the )?camera|stop camera|hide camera|disable camera/i.test(text)) {
@@ -182,11 +299,16 @@ export function Assistant({
         pushActivity({ userText: text, assistantText: line, status: "info" });
         speak(line);
         setBusy(false);
+        bumpHot();
+        scheduleHotListen();
         return;
       }
       if (/go (to )?sleep|standby|good ?night jarvis|lock jarvis/i.test(text)) {
         closeCamera();
         setAwake(false);
+        awakeRef.current = false;
+        setHotUntil(0);
+        hotUntilRef.current = 0;
         const line = "Entering standby.";
         setReply(line);
         pushActivity({ userText: text, assistantText: line, status: "info" });
@@ -195,17 +317,17 @@ export function Assistant({
         return;
       }
 
-      // Capability / limits briefing (no LLM needed)
       if (isCapabilitiesQuestion(text)) {
         const line = CAPABILITIES_FULL;
         setReply(line);
         pushActivity({ userText: text, assistantText: line, status: "info" });
         speak(CAPABILITIES_SPOKEN);
         setBusy(false);
+        bumpHot();
+        scheduleHotListen();
         return;
       }
 
-      // Date / time in Indian Standard Time
       const when = isDateTimeQuestion(text);
       if (when) {
         const line = formatISTReply(when);
@@ -213,64 +335,40 @@ export function Assistant({
         pushActivity({ userText: text, assistantText: line, status: "info" });
         speak(line);
         setBusy(false);
+        bumpHot();
+        scheduleHotListen();
         return;
       }
 
-      // Local laptop actions (desktop agent on localhost:3847)
-      const local = parseLocalAction(text);
-      if (local) {
-        setStatus("working");
-        const online = await agentHealth();
-        if (!online) {
-          const line =
-            "Desktop agent is offline. Run: pnpm agent  (keep that terminal open)";
-          setReply(line);
-          setError(line);
-          pushActivity({ userText: text, assistantText: line, status: "error" });
-          speak(line);
-          setBusy(false);
-          setStatus("");
+      const memCmd = handleMemoryCommand(text);
+      if (memCmd) {
+        if (memCmd.openPath) {
+          await runLocal(
+            {
+              kind: "open_path",
+              target: memCmd.openPath,
+              summary: `Open ${memCmd.openPath}`,
+            },
+            text,
+          );
           return;
         }
-        try {
-          if (local.risky) {
-            const ok = window.confirm(
-              `${local.summary}?\n\nThis affects your whole PC. Continue?`,
-            );
-            if (!ok) {
-              const line = "Cancelled.";
-              setReply(line);
-              pushActivity({
-                userText: text,
-                assistantText: line,
-                status: "info",
-              });
-              speak(line);
-              setBusy(false);
-              setStatus("");
-              return;
-            }
-          }
-          const result = await executeLocalAction(local, {
-            confirm: local.risky === true,
-          });
-          if (!result.ok) {
-            throw new Error(result.error || "Action failed");
-          }
-          const line = result.did || local.summary;
-          setReply(line);
-          pushActivity({ userText: text, assistantText: line, status: "info" });
-          speak(line);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "Local action failed";
-          setError(msg);
-          setReply(msg);
-          pushActivity({ userText: text, status: "error", error: msg });
-          speak(msg);
-        } finally {
-          setBusy(false);
-          setStatus("");
-        }
+        setReply(memCmd.reply);
+        pushActivity({
+          userText: text,
+          assistantText: memCmd.reply,
+          status: "info",
+        });
+        speak(memCmd.reply);
+        setBusy(false);
+        bumpHot();
+        scheduleHotListen();
+        return;
+      }
+
+      const local = parseLocalAction(text);
+      if (local) {
+        await runLocal(local, text);
         return;
       }
 
@@ -281,11 +379,7 @@ export function Assistant({
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: text,
-            walletAddress,
-            chainId,
-          }),
+          body: JSON.stringify({ message: text }),
         });
 
         if (!res.ok) {
@@ -293,20 +387,17 @@ export function Assistant({
           throw new Error(err.error || "Chat failed");
         }
 
-        const data = (await res.json()) as {
-          text: string;
-          intent?: UnsignedIntent | null;
-        };
+        const data = (await res.json()) as { text: string };
 
-        if (data.intent) setIntent(data.intent);
         setReply(data.text || "");
         pushActivity({
           userText: text,
           assistantText: data.text,
-          intentId: data.intent?.id,
-          status: data.intent ? "pending" : "info",
+          status: "info",
         });
         if (data.text) speak(data.text);
+        bumpHot();
+        scheduleHotListen();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Something went wrong";
         setError(msg);
@@ -317,24 +408,25 @@ export function Assistant({
         setBusy(false);
       }
     },
-    [awake, walletAddress, chainId, pushActivity, speak, openCamera, closeCamera],
+    [
+      awake,
+      pushActivity,
+      speak,
+      openCamera,
+      closeCamera,
+      bumpHot,
+      scheduleHotListen,
+      runLocal,
+    ],
   );
 
   const stopListening = useCallback(() => {
-    if (recordModeRef.current) {
-      const rec = mediaRecorderRef.current;
-      if (rec && rec.state !== "inactive") {
-        try {
-          rec.stop();
-        } catch {
-          /* ignore */
-        }
-      } else {
-        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-        mediaStreamRef.current = null;
-        mediaRecorderRef.current = null;
-        recordModeRef.current = false;
-        setListening(false);
+    if (recordModeRef.current && mediaRecorderRef.current) {
+      try {
+        mediaRecorderRef.current.requestData();
+        mediaRecorderRef.current.stop();
+      } catch {
+        /* ignore */
       }
       return;
     }
@@ -347,13 +439,31 @@ export function Assistant({
     setListening(false);
   }, []);
 
-  /** Tray / Electron: record mic locally, transcribe via Gemini (Web Speech is broken in Electron). */
   const startRecordListen = useCallback(async () => {
     setError(null);
     if (typeof MediaRecorder === "undefined") {
       setError("Audio recording not supported here. Type instead.");
       return;
     }
+
+    try {
+      const statusRes = await fetch("/api/transcribe", { cache: "no-store" });
+      const status = (await statusRes.json()) as {
+        ok?: boolean;
+        hint?: string;
+      };
+      if (!status.ok) {
+        setError(
+          status.hint ||
+            "Tray mic needs a Google AIza key — or use jarvis.cmd (Chrome mic).",
+        );
+        return;
+      }
+    } catch {
+      setError("Web UI not reachable for transcription.");
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -384,19 +494,23 @@ export function Assistant({
 
         const chunks = audioChunksRef.current;
         audioChunksRef.current = [];
-        if (!chunks.length) return;
+        if (!chunks.length) {
+          setError("No audio captured. Tap mic and speak.");
+          return;
+        }
 
         const raw = new Blob(chunks, {
           type: recorder.mimeType || "audio/webm",
         });
-        if (raw.size < 800) return;
+        if (raw.size < 800) {
+          setError("Recording too short. Tap mic and speak.");
+          return;
+        }
 
         setBusy(true);
         setStatus("working");
         setError(null);
         try {
-          // Electron bug: streaming MediaRecorder blobs into fetch FormData
-          // throws chunked_data_pipe OnSizeReceived Error -2. Re-wrap with known size.
           const buffer = await raw.arrayBuffer();
           const file = new File([buffer], "jarvis-mic.webm", {
             type: "audio/webm",
@@ -412,7 +526,7 @@ export function Assistant({
           if (!res.ok) throw new Error(data.error || "Transcription failed");
           const said = (data.text || "").trim();
           if (!said) {
-            setError("Did not catch that. Tap mic and speak again.");
+            setError("Did not catch that. Tap mic again.");
             setBusy(false);
             setStatus("");
             return;
@@ -426,10 +540,12 @@ export function Assistant({
         }
       };
 
-      // timeslice so chunks flush cleanly before stop (helps Electron uploads)
       recorder.start(250);
       window.setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        if (
+          mediaRecorderRef.current &&
+          mediaRecorderRef.current.state === "recording"
+        ) {
           try {
             mediaRecorderRef.current.requestData();
             mediaRecorderRef.current.stop();
@@ -445,7 +561,6 @@ export function Assistant({
     }
   }, [runChat]);
 
-  /** Chrome / Edge browser: Web Speech API (fast). */
   const startWebSpeechListen = useCallback(async () => {
     setError(null);
 
@@ -472,7 +587,6 @@ export function Assistant({
     };
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) {
-      // No Web Speech — use recorder path
       void startRecordListen();
       return;
     }
@@ -481,7 +595,7 @@ export function Assistant({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
     } catch {
-      setError("Allow microphone access in the browser address bar, then try again.");
+      setError("Allow microphone access in Chrome’s address bar, then try again.");
       return;
     }
 
@@ -512,14 +626,26 @@ export function Assistant({
       setListening(false);
       recognitionRef.current = null;
 
-      if (code === "aborted" || code === "no-speech") return;
+      if (code === "aborted") return;
+      if (code === "no-speech") {
+        if (awakeRef.current && Date.now() < hotUntilRef.current) {
+          scheduleHotListen();
+        }
+        return;
+      }
       if (code === "not-allowed" || code === "service-not-allowed") {
-        setError("Microphone blocked. Allow mic, then try again.");
+        setError(
+          "Microphone blocked. Click the lock icon in Chrome → allow mic.",
+        );
         return;
       }
       if (code === "network") {
-        // Auto-fallback: works in tray / offline-Google cases
-        void startRecordListen();
+        const inElectron = navigator.userAgent.includes("Electron");
+        if (inElectron) {
+          void startRecordListen();
+          return;
+        }
+        setError("Chrome speech needs internet. Check Wi‑Fi, or type.");
         return;
       }
       if (code === "audio-capture") {
@@ -539,17 +665,22 @@ export function Assistant({
       recognitionRef.current = null;
       void startRecordListen();
     }
-  }, [runChat, startRecordListen]);
+  }, [runChat, scheduleHotListen, startRecordListen]);
 
   const startListening = useCallback(async () => {
     const inElectron = navigator.userAgent.includes("Electron");
     if (inElectron) {
-      // Dream path: tray window voice without Chrome Web Speech
       await startRecordListen();
       return;
     }
     await startWebSpeechListen();
   }, [startRecordListen, startWebSpeechListen]);
+
+  useEffect(() => {
+    startListeningRef.current = () => {
+      void startListening();
+    };
+  }, [startListening]);
 
   const toggleListening = useCallback(() => {
     if (busy) return;
@@ -557,8 +688,31 @@ export function Assistant({
     else void startListening();
   }, [busy, listening, startListening, stopListening]);
 
+  const hotLeft = Math.max(0, hotUntil - Date.now());
+
   return (
     <div className="flex w-full flex-col items-center gap-6">
+      {pendingConfirm && (
+        <ConfirmPanel
+          title={pendingConfirm.action.summary}
+          detail="This affects your PC or an app window. Tony would want a confirm."
+          confirmLabel="Execute"
+          onCancel={() => {
+            setPendingConfirm(null);
+            setReply("Cancelled.");
+            speak("Cancelled.");
+            bumpHot();
+            scheduleHotListen();
+          }}
+          onConfirm={() => {
+            const { action, userText } = pendingConfirm;
+            setPendingConfirm(null);
+            setBusy(true);
+            void runLocal(action, userText, true);
+          }}
+        />
+      )}
+
       <div className="relative flex flex-col items-center">
         {listening && (
           <motion.span
@@ -587,10 +741,12 @@ export function Assistant({
           ? "Listening..."
           : busy || status
             ? status === "working"
-              ? "Transcribing..."
+              ? "Working..."
               : "Working..."
             : awake
-              ? "Online"
+              ? hotLeft > 0
+                ? `Online · hot ${Math.ceil(hotLeft / 1000)}s`
+                : "Online"
               : "Standby"}
       </p>
 
@@ -659,44 +815,37 @@ export function Assistant({
             {reply}
           </p>
         ) : (
-          <p className="text-sm text-mist/40">
-            <span className="font-mono text-xs text-copper/50">jarvis · </span>
-            ...
-          </p>
+          <p className="font-mono text-xs text-mist/40">jarvis · ...</p>
         )}
       </div>
 
-      {awake && intent && (
-        <ActionPreview
-          intent={intent}
-          spendCap={spendCap}
-          onClear={() => setIntent(null)}
-          onResolved={(result) => {
-            if (result.status === "confirmed") {
-              pushActivity({
-                userText: intent.summary || "action",
-                assistantText: `Tx ${result.txHash}`,
-                intentId: intent.id,
-                txHash: result.txHash,
-                status: "confirmed",
-              });
-              speak("Transaction submitted.");
-            } else if (result.status === "rejected") {
-              pushActivity({
-                userText: intent.summary || "action",
-                status: "rejected",
-              });
-            } else {
-              pushActivity({
-                userText: intent.summary || "action",
-                status: "error",
-                error: result.error,
-              });
-            }
-            setIntent(null);
-          }}
-        />
+      {activity.length > 0 && (
+        <div className="w-full space-y-2 text-left">
+          {activity.slice(0, 6).map((a) => (
+            <div
+              key={a.id}
+              className="rounded-lg border border-white/5 bg-black/20 px-3 py-2 font-mono text-[11px] text-mist/70"
+            >
+              {a.userText && (
+                <div>
+                  <span className="text-signal/70">you · </span>
+                  {a.userText}
+                </div>
+              )}
+              {(a.assistantText || a.error) && (
+                <div className="mt-0.5">
+                  <span className="text-copper/80">jarvis · </span>
+                  {a.error || a.assistantText}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
+
+      <p className="font-mono text-[9px] uppercase tracking-[0.32em] text-mist/35">
+        suit.uplink · voice.parser · action.runner
+      </p>
     </div>
   );
 }
