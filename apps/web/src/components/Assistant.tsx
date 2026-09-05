@@ -123,6 +123,7 @@ export function Assistant() {
     "off",
   );
   const [guardHeard, setGuardHeard] = useState("");
+  const [linkState, setLinkState] = useState<string>("…");
 
   useEffect(() => {
     awakeRef.current = awake;
@@ -869,6 +870,24 @@ export function Assistant() {
   }, [startGuard]);
 
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        const d = (await res.json()) as { active?: string; brains?: string[] };
+        if (alive) {
+          setLinkState(d.active || "offline");
+        }
+      } catch {
+        if (alive) setLinkState("offline");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const synth = window.speechSynthesis;
     const warm = () => {
@@ -1060,7 +1079,7 @@ export function Assistant() {
       )}
 
       <p className="font-mono text-[9px] uppercase tracking-[0.32em] text-mist/35">
-        suit.uplink · voice.parser · action.runner
+        suit.uplink · voice.parser · action.runner · brain {linkState}
       </p>
     </div>
   );

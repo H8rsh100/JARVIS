@@ -5,6 +5,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { SYSTEM_PROMPT } from "@jarvis/agent";
 import { formatISTReply } from "@/lib/datetime";
 import { googleAiStudioKey, openaiPlatformKey } from "@/lib/apiKeys";
+import { askOllama, ollamaReady } from "@/lib/ollama";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -54,39 +55,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "message required" }, { status: 400 });
     }
 
-    const resolved = getModel();
-
-    // Fast path for simple talk
+    // Fast path — always free, never touches a model
     const quick = demoReply(message);
     if (quick) {
-      return NextResponse.json({
-        text: quick,
-        provider: "demo-fast",
-      });
+      return NextResponse.json({ text: quick, provider: "demo-fast" });
     }
 
-    if (!resolved) {
-      return NextResponse.json({
-        text:
-          quick ||
-          "Systems nominal, but no AI key is loaded. Add GOOGLE_GENERATIVE_AI_API_KEY to apps/web/.env.local and restart.",
-        provider: "demo",
-      });
-    }
-
-    const result = await generateText({
-      model: resolved.model,
-      system: `${SYSTEM_PROMPT}
+    const system = `${SYSTEM_PROMPT}
 Clock (authoritative): ${formatISTReply("both")}
-Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly witty. Never use em dashes. For date/time questions use the Clock line above (IST).`,
-      prompt: message,
-      maxSteps: 1,
-      temperature: 0.35,
-    });
+Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly witty. Never use em dashes. For date/time questions use the Clock line above (IST).`;
 
+    const cloud = getModel();
+
+    // 1) Prefer the cloud brain (smart + witty)
+    if (cloud) {
+      try {
+        const result = await generateText({
+          model: cloud.model,
+          system,
+          prompt: message,
+          maxSteps: 1,
+          temperature: 0.35,
+        });
+        return NextResponse.json({
+          text: result.text || "Done.",
+          provider: cloud.provider,
+        });
+      } catch {
+        // cloud failed — fall through to local
+      }
+    }
+
+    // 2) Fall back to the local brain (offline, unlimited)
+    const localModel = await ollamaReady();
+    if (localModel) {
+      try {
+        const text = await askOllama(localModel, system, message);
+        if (text) {
+          return NextResponse.json({ text, provider: "local" });
+        }
+      } catch {
+        // local failed too — fall through to canned
+      }
+    }
+
+    // 3) Last resort — offline canned replies
     return NextResponse.json({
-      text: result.text || quick || "Done.",
-      provider: resolved.provider,
+      text:
+        demoReply("help") ||
+        "I'm running with limited brains right now. Try: what can you do? open chrome, what time is it?",
+      provider: "offline",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Chat failed";
@@ -97,3 +115,4 @@ Reply in 1-3 short sentences. Sound like Stark's JARVIS: calm, precise, slightly
     });
   }
 }
+
