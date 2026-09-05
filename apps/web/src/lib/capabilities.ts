@@ -11,6 +11,7 @@ I can:
 - Scan installed Start Menu apps and open them by name (aliases + fuzzy match)
 - Open apps: Chrome, Edge, Cursor, VS Code, WhatsApp, Slack, Notion, Figma, Outlook, Spotify, Discord, Teams, and more
 - Open folders: Desktop, Downloads, Documents, Home, JARVIS project, today's Downloads, resume/CV search
+- Open any named folder on this PC: "open the folder called projects in the C drive" finds and opens it
 - Open sites and URLs
 - Window control: focus, minimize, close (close asks confirm)
 - Clipboard: read clipboard, "copy that" for my last reply

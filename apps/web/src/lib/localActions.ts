@@ -7,6 +7,7 @@ export type LocalAction = {
     | "open_app"
     | "open_url"
     | "open_path"
+    | "open_folder"
     | "shell"
     | "power"
     | "scan_apps"
@@ -267,6 +268,37 @@ export function parseLocalAction(text: string): LocalAction | null {
       target: "jarvis",
       summary: "Open JARVIS project folder",
     };
+  }
+
+  // Find + open a named folder, optionally pinned to a drive ("in the C drive")
+  {
+    let norm = t;
+    let drive = "";
+    const driveMatch = norm.match(
+      /\s+in\s+(?:the\s+)?([a-z])\s*:?\s*drive?\s*$/i,
+    );
+    if (driveMatch?.[1]) {
+      drive = driveMatch[1].toUpperCase();
+      norm = norm.slice(0, driveMatch.index).trim();
+    }
+    const named =
+      norm.match(
+        /\b(?:open|show|find|launch|go to|navigate to)\b[\s\S]*?\b(?:folder|directory)\b[\s\S]*?\b(?:called|named|titled)\s+["']?([a-z0-9][a-z0-9 _-]*?)["']?\s*$/i,
+      ) ||
+      norm.match(
+        /\b(?:open|show|find|launch|go to|navigate to)\b[\s\S]*?\b(?:the\s+)?([a-z0-9][a-z0-9 _-]*?)\s+(?:folder|directory)\b\s*$/i,
+      );
+    if (named?.[1]) {
+      const name = named[1].replace(/[?!.,]+$/, "").trim();
+      if (name.length >= 2 && name.length < 60) {
+        return {
+          kind: "open_folder",
+          target: name,
+          text: drive,
+          summary: `Open folder ${name}${drive ? ` on ${drive}:` : ""}`,
+        };
+      }
+    }
   }
 
   // Known app aliases

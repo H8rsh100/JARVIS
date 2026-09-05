@@ -327,6 +327,53 @@ async function findResume() {
   return hits;
 }
 
+/**
+ * Find a folder by name, optionally pinned to a drive like "C".
+ * Checks the drive root first (C:\PROJECTS for "projects"), then walks
+ * known roots for an exact match, then a contains match.
+ */
+async function findOpenFolder(name, drive) {
+  const q = String(name).toLowerCase();
+  const driveOk = /^[a-z]$/i.test(drive || "");
+
+  if (driveOk) {
+    const direct = `${drive.toUpperCase()}:\\${name}`;
+    if (fs.existsSync(direct)) return direct;
+  }
+
+  const roots = [];
+  if (driveOk) roots.push(`${drive.toUpperCase()}:\\`);
+  roots.push("C:\\PROJECTS", os.homedir());
+  for (const d of ["Desktop", "Documents", "Downloads"]) {
+    const r = path.join(os.homedir(), d);
+    if (fs.existsSync(r)) roots.push(r);
+  }
+  const unique = [...new Set(roots)].filter((r) => fs.existsSync(r));
+
+  const exact = [];
+  const fuzzy = [];
+  const walk = (dir, depth) => {
+    if (depth > 3 || exact.length >= 8 || fuzzy.length >= 8) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (ent.name.startsWith(".") || ["node_modules", "build", "out", "dist", "$Recycle.Bin", "System Volume Information"].includes(ent.name)) continue;
+      const full = path.join(dir, ent.name);
+      const lower = ent.name.toLowerCase();
+      if (lower === q) exact.push(full);
+      else if (lower.includes(q)) fuzzy.push(full);
+      walk(full, depth + 1);
+    }
+  };
+  for (const r of unique) walk(r, 0);
+  return exact[0] || fuzzy[0] || null;
+}
+
 async function searchLocalFiles(kind, query) {
   const home = os.homedir();
   const roots = [
@@ -598,6 +645,23 @@ app.post("/execute", async (req, res) => {
       }
       await runWindows(`explorer ${quotePath(p)}`);
       return res.json({ ok: true, did: `Opened ${p}` });
+    }
+
+    if (kind === "open_folder") {
+      const name = String(target || "").trim();
+      const drive = String(text || "").trim().toUpperCase();
+      if (!name) {
+        return res.status(400).json({ ok: false, error: "folder name required" });
+      }
+      const found = await findOpenFolder(name, drive);
+      if (!found) {
+        return res.status(404).json({
+          ok: false,
+          error: `No folder named "${name}" found${drive ? ` on ${drive}:` : ""}. Try a clearer name or check the location first.`,
+        });
+      }
+      await runWindows(`explorer ${quotePath(found)}`);
+      return res.json({ ok: true, did: `Opened ${found}`, path: found });
     }
 
     if (kind === "window") {
