@@ -175,7 +175,33 @@ export function Assistant() {
     }
   }, []);
 
-  const scheduleHotListen = useCallback(() => {}, []);
+  const scheduleHotListen = useCallback(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+
+    const tryArm = () => {
+      if (!awakeRef.current) return;
+      if (Date.now() >= hotUntilRef.current) return;
+      if (busyRef.current) return;
+      if (recognitionRef.current || mediaRecorderRef.current) return;
+      if (guardRef.current) return;
+      startListeningRef.current();
+    };
+
+    if (synth.speaking) {
+      const onEnd = () => {
+        synth.removeEventListener?.("end", onEnd);
+        window.setTimeout(tryArm, 400);
+      };
+      synth.addEventListener?.("end", onEnd);
+      window.setTimeout(() => {
+        synth.removeEventListener?.("end", onEnd);
+        tryArm();
+      }, 15000);
+    } else {
+      window.setTimeout(tryArm, 300);
+    }
+  }, []);
 
   const openCamera = useCallback(async () => {
     try {

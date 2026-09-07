@@ -43,10 +43,10 @@ function chromeBrowseCmd() {
   ].filter(Boolean);
   for (const exe of candidates) {
     if (fs.existsSync(exe)) {
-      return `start "" ${quotePath(exe)} --new-window about:blank`;
+      return `powershell -NoProfile -Command "Start-Process -FilePath '${exe}' -ArgumentList '--new-window','about:blank'"`;
     }
   }
-  return 'start "" chrome --new-window about:blank';
+  return `powershell -NoProfile -Command "Start-Process -FilePath chrome -ArgumentList '--new-window','about:blank'"`;
 }
 
 /** Fast aliases — always preferred when they match. */
