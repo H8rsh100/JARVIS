@@ -8,6 +8,7 @@ export type LocalAction = {
     | "open_url"
     | "open_path"
     | "open_folder"
+    | "open_file"
     | "shell"
     | "power"
     | "scan_apps"
@@ -301,14 +302,36 @@ export function parseLocalAction(text: string): LocalAction | null {
     }
   }
 
-  // Known app aliases
-  if (/\b(open|launch|start|run)\b/i.test(t)) {
-    for (const app of APP_ALIASES) {
-      if (app.keys.test(t)) {
+  // Known app aliases (+ file opens for open/show/launch/view/read)
+  if (/\b(open|launch|start|run|view|read)\b/i.test(t)) {
+    // App aliases only fire on open-verbs, so "read about chrome" never opens Chrome
+    if (/\b(open|launch|start|run)\b/i.test(t)) {
+      for (const app of APP_ALIASES) {
+        if (app.keys.test(t)) {
+          return {
+            kind: "open_app",
+            target: app.target,
+            summary: `Open ${app.label}`,
+          };
+        }
+      }
+    }
+
+    // Files: open <name.ext> → open the file itself, never an app
+    const fileName =
+      t.match(
+        /\b(?:open|show|launch|view|read)\b[\s\S]*?\b(?:the\s+|my\s+|this\s+|a\s+)?(?:file\s+(?:called|named)\s+)?["']?([a-z0-9][a-z0-9 _\-()]*\.(pdf|docx?|xlsx?|pptx?|txt|md|markdown|csv|tsv|json|log|png|jpe?g|gif|webp|bmp|svg|mp4|mkv|mov|avi|mp3|wav|flac|zip|rar|7z|html?|exe|msi|lnk|ppt|odt|rtf))\b/i,
+      ) ||
+      t.match(
+        /\b(?:open|show|launch|view|read)\b[\s\S]*?\bfile\b[\s\S]*?\b(?:called|named)\s+["']?([a-z0-9][a-z0-9 _\-()]*?)["']?\s*$/i,
+      );
+    if (fileName?.[1]) {
+      const name = fileName[1].replace(/[?.!]+$/, "").trim();
+      if (name.length >= 2 && name.length < 80) {
         return {
-          kind: "open_app",
-          target: app.target,
-          summary: `Open ${app.label}`,
+          kind: "open_file",
+          target: name,
+          summary: `Open file ${name}`,
         };
       }
     }

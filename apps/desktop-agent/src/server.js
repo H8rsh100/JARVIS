@@ -162,6 +162,15 @@ $out | ConvertTo-Json -Compress
     .filter((a) => a.name)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Merge Store/UWP + modern Win32 apps (skips names we already have)
+  try {
+    const extra = await scanUwpApps(new Set(apps.map((a) => a.name.toLowerCase())));
+    for (const u of extra) apps.push(u);
+    apps.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    /* best-effort */
+  }
+
   const payload = { at: Date.now(), count: apps.length, apps };
   try {
     fs.writeFileSync(CACHE_PATH, JSON.stringify(payload), "utf8");
@@ -169,6 +178,44 @@ $out | ConvertTo-Json -Compress
     /* ignore cache write */
   }
   return payload;
+}
+
+/** Microsoft Store / UWP + modern Win32 apps via Get-StartApps. Best-effort. */
+async function scanUwpApps(existingNames) {
+  const found = [];
+  try {
+    const { stdout } = await runWindows(
+      `powershell -NoProfile -Command "Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress"`,
+      30000,
+    );
+    const parsed = JSON.parse(stdout || "[]");
+    const list = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+    for (const u of list) {
+      const name = String(u.Name || "").trim();
+      const appId = String(u.AppID || "").trim();
+      if (!name || !appId) continue;
+      if (existingNames.has(name.toLowerCase())) continue;
+      existingNames.add(name.toLowerCase());
+      found.push({ name, target: "", lnk: "", appId });
+    }
+    found.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    /* UWP enumeration is best-effort */
+  }
+  return found;
+}
+
+/** Launch a Store/UWP app by AppID (or embedded exe path for modern Win32). */
+async function launchUwpApp(appId) {
+  const id = String(appId || "");
+  const exeMatch = id.match(/([a-z]:\\.*\.exe)\s*$/i);
+  if (exeMatch && fs.existsSync(exeMatch[1])) {
+    await runWindows(`start "" ${quotePath(exeMatch[1])}`);
+    return;
+  }
+  await runWindows(
+    `powershell -NoProfile -Command "Start-Process 'shell:AppsFolder\\\\${id}'"`,
+  );
 }
 
 function readAppCache() {
@@ -198,15 +245,19 @@ async function getApps({ force = false } = {}) {
 function findApp(query, apps) {
   let best = null;
   let bestScore = 0;
+  const scored = [];
   for (const a of apps) {
     const s = scoreMatch(query, a.name);
+    if (s > 0) scored.push({ app: a, score: s });
     if (s > bestScore) {
       bestScore = s;
       best = a;
     }
   }
-  if (bestScore >= 65) return { app: best, score: bestScore };
-  return null;
+  scored.sort((x, y) => y.score - x.score);
+  const suggestions = scored.slice(0, 3).map((x) => x.app.name);
+  if (bestScore >= 65) return { app: best, score: bestScore, suggestions };
+  return { app: null, score: bestScore, suggestions };
 }
 
 async function openResolvedApp(query) {
@@ -220,22 +271,65 @@ async function openResolvedApp(query) {
 
   const catalog = await getApps();
   const hit = findApp(query, catalog.apps || []);
-  if (!hit) {
+  if (hit.app) {
+    if (hit.app.appId) {
+      await launchUwpApp(hit.app.appId);
+      return {
+        ok: true,
+        did: `Opened ${hit.app.name}`,
+        via: "store",
+        matched: hit.app.name,
+      };
+    }
+    const launchPath = hit.app.lnk || hit.app.target;
+    if (!launchPath) {
+      return { ok: false, error: `Found ${hit.app.name} but no launch path.` };
+    }
+    await runWindows(`start "" ${quotePath(launchPath)}`);
     return {
-      ok: false,
-      error: `No installed app matched "${query}". Try "scan apps" then ask again, or a clearer name.`,
+      ok: true,
+      did: `Opened ${hit.app.name}`,
+      via: "scan",
+      matched: hit.app.name,
     };
   }
-  const launchPath = hit.app.lnk || hit.app.target;
-  if (!launchPath) {
-    return { ok: false, error: `Found ${hit.app.name} but no launch path.` };
+
+  // PATH fallback: CLI tools and portable exes (code, wt, python...)
+  const firstWord = key.split(/\s+/)[0] || "";
+  if (/^[a-z0-9_+\-.]+$/i.test(firstWord)) {
+    try {
+      const { stdout } = await runWindows(`where.exe ${firstWord}`, 8000);
+      const found = (stdout || "")
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)[0];
+      if (found && fs.existsSync(found)) {
+        await runWindows(`start "" ${quotePath(found)}`);
+        return { ok: true, did: `Opened ${firstWord}`, via: "path", matched: found };
+      }
+    } catch {
+      /* not on PATH — fall through */
+    }
   }
-  await runWindows(`start "" ${quotePath(launchPath)}`);
+
+  // File fallback: "open report.pdf" opens the file instead of 404ing as an app
+  const fileHit = await findOpenFile(query);
+  if (fileHit) {
+    await runWindows(`start "" ${quotePath(fileHit.path)}`);
+    return {
+      ok: true,
+      did: `Opened file ${fileHit.path}`,
+      via: "file",
+      matched: fileHit.path,
+    };
+  }
+
+  const hint = hit.suggestions?.length
+    ? ` Did you mean: ${hit.suggestions.slice(0, 3).join(", ")}?`
+    : "";
   return {
-    ok: true,
-    did: `Opened ${hit.app.name}`,
-    via: "scan",
-    matched: hit.app.name,
+    ok: false,
+    error: `No installed app matched "${query}".${hint} Try "scan apps" then ask again, or a clearer name.`,
   };
 }
 
@@ -374,8 +468,68 @@ async function findOpenFolder(name, drive) {
   return exact[0] || fuzzy[0] || null;
 }
 
-async function searchLocalFiles(kind, query) {
-  const home = os.homedir();
+/**
+ * Resolve a spoken file name to a real file.
+ * Absolute paths open directly; otherwise exact basename, then stem match
+ * ("report" finds "report.pdf"), then contains match. Returns { path } or null.
+ */
+async function findOpenFile(name) {
+  const q = String(name || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  if (!q) return null;
+  if (/^[a-z]:\\/i.test(q) && fs.existsSync(q)) {
+    try {
+      if (fs.statSync(q).isFile()) return { path: q };
+    } catch {
+      /* fall through to search */
+    }
+  }
+  const base = path.basename(q);
+  const qLower = base.toLowerCase();
+  const stem = qLower.replace(/\.[a-z0-9]+$/, "");
+  const roots = [
+    path.join(os.homedir(), "Desktop"),
+    path.join(os.homedir(), "Documents"),
+    path.join(os.homedir(), "Downloads"),
+    "C:\\PROJECTS",
+    os.homedir(),
+  ].filter((r, i, arr) => fs.existsSync(r) && arr.indexOf(r) === i);
+
+  const exact = [];
+  const stemHits = [];
+  const fuzzy = [];
+  for (const root of roots) {
+    const walk = (dir, depth) => {
+      if (depth > 3 || exact.length >= 6) return;
+      let entries = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (
+            ent.name.startsWith(".") ||
+            ["node_modules", "build", "out", "dist"].includes(ent.name)
+          )
+            continue;
+          walk(full, depth + 1);
+        } else {
+          const lower = ent.name.toLowerCase();
+          if (lower === qLower) exact.push(full);
+          else if (lower === stem || lower.startsWith(stem + ".")) stemHits.push(full);
+          else if (stem.length >= 3 && lower.includes(stem)) fuzzy.push(full);
+        }
+      }
+    };
+    walk(root, 0);
+  }
+  return { path: exact[0] || stemHits[0] || fuzzy[0] || null };
+}
+async function searchLocalFiles(kind, query) {  const home = os.homedir();
   const roots = [
     "C:\\PROJECTS",
     path.join(home, "Desktop"),
@@ -593,6 +747,26 @@ app.post("/execute", async (req, res) => {
         return res.status(404).json(result);
       }
       return res.json(result);
+    }
+
+    if (kind === "open_file") {
+      const name = String(target || text || "").trim();
+      if (!name) {
+        return res.status(400).json({ ok: false, error: "file name required" });
+      }
+      const found = await findOpenFile(name);
+      if (!found?.path) {
+        return res.status(404).json({
+          ok: false,
+          error: `No file named "${name}" found on Desktop, Documents, Downloads, or C:\\PROJECTS.`,
+        });
+      }
+      await runWindows(`start "" ${quotePath(found.path)}`);
+      return res.json({
+        ok: true,
+        did: `Opened file ${found.path}`,
+        path: found.path,
+      });
     }
 
     if (kind === "open_url") {

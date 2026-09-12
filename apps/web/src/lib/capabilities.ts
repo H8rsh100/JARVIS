@@ -8,8 +8,10 @@ export const CAPABILITIES_BRIEF =
 export const CAPABILITIES_FULL = `Here is my scope on this laptop.
 
 I can:
-- Scan installed Start Menu apps and open them by name (aliases + fuzzy match)
+- Scan every installed app (Start Menu + Microsoft Store) and open it by name, with did-you-mean suggestions; PATH tools work too
 - Open apps: Chrome, Edge, Cursor, VS Code, WhatsApp, Slack, Notion, Figma, Outlook, Spotify, Discord, Teams, and more
+- Teach me nicknames: "when I say studio, open Android Studio", "list my aliases"
+- Open files by name: "open report.pdf" opens it in its default program
 - Open folders: Desktop, Downloads, Documents, Home, JARVIS project, today's Downloads, resume/CV search
 - Open any named folder on this PC: "open the folder called projects in the C drive" finds and opens it
 - Open sites and URLs

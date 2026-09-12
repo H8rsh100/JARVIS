@@ -454,6 +454,16 @@ export function Assistant() {
         return;
       }
 
+      // Teachable aliases win over everything ("when I say studio, open ...")
+      const taught = loadMemory().aliases?.[text.toLowerCase().trim()];
+      if (taught) {
+        await runLocal(
+          { kind: "open_app", target: taught, summary: `Open ${taught}` },
+          text,
+        );
+        return;
+      }
+
       const local = parseLocalAction(text);
       if (local) {
         await runLocal(local, text);

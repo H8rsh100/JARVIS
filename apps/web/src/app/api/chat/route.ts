@@ -29,14 +29,14 @@ function getModel(): { model: LanguageModel; provider: string } | null {
 function demoReply(message: string): string | null {
   const m = message.toLowerCase();
   if (/hello|hi\b|hey|who are you|jarvis/.test(m)) {
-    return "JARVIS online. Local laptop assistant ready. Wake is Hey Jarvis, then tap the mic for commands. I open allowlisted apps and folders on this PC. I do not have full system control.";
+    return "JARVIS online. Local laptop assistant ready. Wake is Hey Jarvis, then tap the mic for commands. I open any installed app, folders, and files on this PC. I do not have full system control.";
   }
   if (
     /what can you|help|capabilit|limits|permissions|full (pc|computer|laptop)|can you control|can you access/.test(
       m,
     )
   ) {
-    return "I can open allowlisted apps, folders, and URLs via the local desktop agent, plus camera in this UI. I cannot do full PC control, arbitrary file reads or writes, mouse or keyboard takeover, silent system settings, or unchecked shell.";
+    return "I can open any installed app (Start Menu + Store), folders, and files by name via the local desktop agent, plus camera in this UI. I cannot do full PC control, arbitrary file reads or writes, mouse or keyboard takeover, silent system settings, or unchecked shell.";
   }
   if (/balance|wallet|crypto|swap|token/.test(m)) {
     return "Wallet and chain features were retired in this build. I am focused on laptop control now.";

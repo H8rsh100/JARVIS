@@ -6,6 +6,8 @@ export type JarvisMemory = {
   name?: string;
   projectPath?: string;
   favorites?: string[];
+  /** Teachable open-aliases: "studio" -> "Android Studio" */
+  aliases?: Record<string, string>;
 };
 
 export function loadMemory(): JarvisMemory {
@@ -14,12 +16,19 @@ export function loadMemory(): JarvisMemory {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as JarvisMemory;
+    const aliases: Record<string, string> = {};
+    if (parsed.aliases && typeof parsed.aliases === "object") {
+      for (const [k, v] of Object.entries(parsed.aliases)) {
+        if (typeof v === "string" && v.trim()) aliases[k] = v.trim();
+      }
+    }
     return {
       name: parsed.name?.trim() || undefined,
       projectPath: parsed.projectPath?.trim() || undefined,
       favorites: Array.isArray(parsed.favorites)
         ? parsed.favorites.map(String).slice(0, 20)
         : undefined,
+      aliases: Object.keys(aliases).length ? aliases : undefined,
     };
   } catch {
     return {};
@@ -83,6 +92,47 @@ export function handleMemoryCommand(
     return {
       reply:
         "No saved project path. Say: remember my project is C:\\path\\to\\folder",
+      memory,
+    };
+  }
+
+  const aliasSet = t.match(
+    /\bwhen i say\s+(.+?)\s*,?\s*(?:please\s+)?open\s+(.+?)\s*$/i,
+  );
+  if (aliasSet?.[1] && aliasSet?.[2]) {
+    const say = aliasSet[1].replace(/^["']|["']$/g, "").trim().toLowerCase();
+    const target = aliasSet[2].replace(/^["']|["']$/g, "").trim();
+    if (say.length >= 2 && say.length < 60 && target.length >= 1 && target.length < 80) {
+      const memory = loadMemory();
+      const aliases = { ...(memory.aliases || {}), [say]: target };
+      const next = saveMemory({ aliases });
+      return {
+        reply: `Got it. When you say "${say}", I'll open ${target}.`,
+        memory: next,
+      };
+    }
+  }
+
+  const aliasForget = t.match(/\bforget alias\s+(.+?)\s*$/i);
+  if (aliasForget?.[1]) {
+    const say = aliasForget[1].replace(/^["']|["']$/g, "").trim().toLowerCase();
+    const memory = loadMemory();
+    if (memory.aliases?.[say]) {
+      const aliases = { ...memory.aliases };
+      delete aliases[say];
+      const next = saveMemory({ aliases });
+      return { reply: `Forgot the alias for "${say}".`, memory: next };
+    }
+    return { reply: `No alias saved for "${say}".`, memory };
+  }
+
+  if (/\b(list|show)\s+(my\s+)?aliases\b/i.test(t)) {
+    const memory = loadMemory();
+    const entries = Object.entries(memory.aliases || {});
+    return {
+      reply: entries.length
+        ? `Aliases: ${entries.map(([k, v]) => `"${k}" opens ${v}`).join("; ")}`
+        : 'No aliases yet. Say: when I say studio, open Android Studio',
       memory,
     };
   }
